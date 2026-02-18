@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "name": "eug-msv-claude-marketplace",
   "description": "Plugin marketplace for Claude Code from Eugene Moiseev",
   "updated": "2026-02-18",
