@@ -4,6 +4,10 @@
   "name": "eug-msv-claude-marketplace",
   "description": "Plugin marketplace for Claude Code from Eugene Moiseev",
   "updated": "2026-02-17",
+  "owner": {
+    "name": "Eugene Moiseev",
+    "url": "https://github.com/EugeneMsv"
+  },
   "plugins": [
     {
       "name": "ai-contribution-tracker",
