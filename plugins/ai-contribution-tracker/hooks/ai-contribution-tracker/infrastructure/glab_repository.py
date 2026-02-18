@@ -3,7 +3,7 @@
 import json
 import subprocess
 from logging import Logger
-from typing import Optional, Dict
+from typing import Dict, List, Optional
 
 
 class GlabRepository:
@@ -46,7 +46,7 @@ class GlabRepository:
             branch: Source branch name
 
         Returns:
-            Dict with 'iid', 'title', and 'description' keys, or None if no MR found
+            Dict with 'iid', 'title', 'description', and 'labels' keys, or None if no MR found
         """
         try:
             result = subprocess.run(
@@ -69,7 +69,8 @@ class GlabRepository:
             return {
                 'iid': str(mr['iid']),
                 'title': mr['title'],
-                'description': mr.get('description', '')
+                'description': mr.get('description', ''),
+                'labels': mr.get('labels', [])
             }
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
             self._logger.warning(f"glab mr list failed: {e}")
@@ -77,6 +78,52 @@ class GlabRepository:
         except (json.JSONDecodeError, KeyError, IndexError) as e:
             self._logger.warning(f"Failed to parse glab output: {e}")
             return None
+
+    def add_label(self, mr_iid: str, label: str) -> bool:
+        """Add a label to an MR using glab CLI.
+
+        Args:
+            mr_iid: MR internal ID (number)
+            label: Label name to add
+
+        Returns:
+            True if successful
+        """
+        try:
+            subprocess.run(
+                ['glab', 'mr', 'update', mr_iid, '--label', label, '--yes'],
+                capture_output=True,
+                check=True,
+                timeout=self.TIMEOUT_SECONDS
+            )
+            self._logger.info(f"MR !{mr_iid} label added: {label}")
+            return True
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            self._logger.warning(f"Failed to add label to MR: {e}")
+            return False
+
+    def remove_label(self, mr_iid: str, label: str) -> bool:
+        """Remove a label from an MR using glab CLI.
+
+        Args:
+            mr_iid: MR internal ID (number)
+            label: Label name to remove
+
+        Returns:
+            True if successful
+        """
+        try:
+            subprocess.run(
+                ['glab', 'mr', 'update', mr_iid, '--unlabel', label, '--yes'],
+                capture_output=True,
+                check=True,
+                timeout=self.TIMEOUT_SECONDS
+            )
+            self._logger.info(f"MR !{mr_iid} label removed: {label}")
+            return True
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            self._logger.warning(f"Failed to remove label from MR: {e}")
+            return False
 
     def update_mr_title(self, mr_iid: str, title: str) -> bool:
         """Update MR title using glab CLI.
@@ -124,7 +171,14 @@ class GlabRepository:
             self._logger.warning(f"Failed to update MR description: {e}")
             return False
 
-    def create_draft_mr(self, source_branch: str, title: str, target_branch: str, description: str = '') -> bool:
+    def create_draft_mr(
+        self,
+        source_branch: str,
+        title: str,
+        target_branch: str,
+        description: str = '',
+        label: Optional[str] = None
+    ) -> bool:
         """Create a draft MR using glab CLI.
 
         Args:
@@ -132,21 +186,25 @@ class GlabRepository:
             title: MR title
             target_branch: Target branch name (e.g., 'main')
             description: MR description (default: empty string)
+            label: Optional label to attach to the MR on creation
 
         Returns:
             True if creation succeeded
         """
         try:
+            cmd = [
+                'glab', 'mr', 'create',
+                '--draft',
+                '--title', title,
+                '--source-branch', source_branch,
+                '--target-branch', target_branch,
+                '--description', description,
+                '--yes'
+            ]
+            if label:
+                cmd.extend(['--label', label])
             result = subprocess.run(
-                [
-                    'glab', 'mr', 'create',
-                    '--draft',
-                    '--title', title,
-                    '--source-branch', source_branch,
-                    '--target-branch', target_branch,
-                    '--description', description,
-                    '--yes'
-                ],
+                cmd,
                 capture_output=True,
                 text=True,
                 check=True,
