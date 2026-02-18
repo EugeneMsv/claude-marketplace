@@ -1,0 +1,49 @@
+{
+  "description": "AI Contribution Tracker - Automatically tracks AI vs human contributions and injects stats into git commits",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-contribution-tracker/ai-tracker-format-pre.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-contribution-tracker/ai-tracker-capture.py",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-contribution-tracker/ai-tracker-inject.py",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-contribution-tracker/ai-tracker-mr-update.py",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-contribution-tracker/ai-tracker-format-post.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

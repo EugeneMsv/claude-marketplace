@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "version": "0.0.1",
+  "name": "eug-msv-claude-marketplace",
+  "description": "Plugin marketplace for Claude Code from Eugene Moiseev",
+  "updated": "2026-02-17",
+  "plugins": [
+    {
+      "name": "ai-contribution-tracker",
+      "source": "./plugins/ai-contribution-tracker",
+      "description": "Track and report AI assistant contributions to the codebase",
+      "version": "0.0.1",
+      "author": {
+        "name": "Eugene Moiseev"
+      },
+      "category": "development",
+      "homepage": "https://github.com/EugeneMsv/claude-marketplace/tree/main/plugins/ai-contribution-tracker",
+      "tags": ["metrics","monitoring","tracking"]
+    }
+  ]
+}
