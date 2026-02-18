@@ -13,6 +13,7 @@ PUSH_PATTERN = re.compile(r'\bgit\s+push\b')
 STATS_TAG_PATTERN = re.compile(r'\s*\[AI:\s*\d+%\]')
 STATS_SECTION_PATTERN = re.compile(r'## AI Contribution Stats\s*```[^`]*```', re.MULTILINE | re.DOTALL)
 TICKET_PATTERN = re.compile(r'([A-Z]+-\d+)', re.IGNORECASE)
+AI_LABEL_PATTERN = re.compile(r'^AI:\d+%$')
 
 
 class MrResult:
@@ -139,6 +140,21 @@ class MrService:
         else:
             self._logger.info("Description unchanged, skipping description update")
 
+        # Apply AI label if labeling is enabled
+        if self._config.mr_labeling_enabled:
+            new_label = self._ai_label(stats)
+            existing_ai_label = next(
+                (lbl for lbl in mr.get('labels', []) if AI_LABEL_PATTERN.match(lbl)),
+                None
+            )
+            if existing_ai_label is None:
+                self._glab_repo.add_label(mr['iid'], new_label)
+            elif existing_ai_label != new_label:
+                self._glab_repo.remove_label(mr['iid'], existing_ai_label)
+                self._glab_repo.add_label(mr['iid'], new_label)
+            else:
+                self._logger.info(f"AI label unchanged: {new_label}")
+
         success = title_updated or description_updated
         ai_percentage = int(round(stats.ai_percentage)) if success else None
         return MrResult(success, ai_percentage)
@@ -169,6 +185,7 @@ class MrService:
         # Try to add AI stats if available
         description = ''
         ai_percentage = None
+        create_label = None
         git_root = self._git_repo.get_root()
         if git_root:
             sanitized_branch = GitRepository.sanitize_branch_name(branch)
@@ -186,8 +203,12 @@ class MrService:
                 description = stats.format_description()
                 self._logger.info("Added AI stats to description")
 
+                # Compute label for creation if labeling enabled
+                if self._config.mr_labeling_enabled:
+                    create_label = self._ai_label(stats)
+
         # Create draft MR
-        success = self._glab_repo.create_draft_mr(branch, title, target_branch, description)
+        success = self._glab_repo.create_draft_mr(branch, title, target_branch, description, label=create_label)
         if success:
             self._logger.info(f"=== Draft MR created: {title} ===")
             # Show message if MR created without stats
@@ -260,6 +281,18 @@ class MrService:
         if clean_title:
             return f"{clean_title} {tag}"
         return tag
+
+    @staticmethod
+    def _ai_label(stats: ContributionStats) -> str:
+        """Build AI label string from contribution stats.
+
+        Args:
+            stats: Contribution stats
+
+        Returns:
+            Label string like 'AI:85%'
+        """
+        return f"AI:{int(round(stats.ai_percentage))}%"
 
     @staticmethod
     def _merge_description(current_description: str, stats: ContributionStats) -> str:
