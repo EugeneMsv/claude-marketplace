@@ -23,6 +23,7 @@ class Configuration:
         format_commands: List[str] = None,
         mr_title_update_enabled: bool = False,
         mr_auto_creation_enabled: bool = False,
+        mr_labeling_enabled: bool = False,
         housekeeping_enabled: bool = False,
         housekeeping_stale_days: int = 7,
         housekeeping_max_files: int = 5
@@ -39,6 +40,7 @@ class Configuration:
             format_commands: List of formatter commands to detect
             mr_title_update_enabled: Whether MR title update on push is enabled
             mr_auto_creation_enabled: Whether draft MR auto-creation on push is enabled
+            mr_labeling_enabled: Whether MR label with AI percentage is enabled
             housekeeping_enabled: Whether housekeeping is enabled
             housekeeping_stale_days: Days threshold for stale tracking files
             housekeeping_max_files: Max files to process per housekeeping run
@@ -52,6 +54,7 @@ class Configuration:
         self._format_commands = format_commands.copy() if format_commands else []
         self._mr_title_update_enabled = mr_title_update_enabled
         self._mr_auto_creation_enabled = mr_auto_creation_enabled
+        self._mr_labeling_enabled = mr_labeling_enabled
         self._housekeeping_enabled = housekeeping_enabled
         self._housekeeping_stale_days = housekeeping_stale_days
         self._housekeeping_max_files = housekeeping_max_files
@@ -99,6 +102,11 @@ class Configuration:
     def mr_auto_creation_enabled(self) -> bool:
         """Check if draft MR auto-creation on push is enabled."""
         return self._mr_auto_creation_enabled
+
+    @property
+    def mr_labeling_enabled(self) -> bool:
+        """Check if MR label with AI percentage is enabled."""
+        return self._mr_labeling_enabled
 
     @property
     def format_detection_enabled(self) -> bool:
@@ -179,7 +187,8 @@ class ConfigurationLoader:
         },
         'mr': {
             'titleUpdateEnabled': False,
-            'autoCreationEnabled': False
+            'autoCreationEnabled': False,
+            'labelingEnabled': False
         },
         'housekeeping': {
             'enabled': False,
@@ -266,6 +275,7 @@ class ConfigurationLoader:
         mr_config = config_dict.get('mr', default_mr)
         mr_title_update_enabled = mr_config.get('titleUpdateEnabled', default_mr['titleUpdateEnabled'])
         mr_auto_creation_enabled = mr_config.get('autoCreationEnabled', default_mr['autoCreationEnabled'])
+        mr_labeling_enabled = mr_config.get('labelingEnabled', default_mr['labelingEnabled'])
 
         # Load housekeeping settings with defaults
         default_housekeeping = ConfigurationLoader.DEFAULT_CONFIG['housekeeping']
@@ -284,6 +294,7 @@ class ConfigurationLoader:
             format_commands=format_commands,
             mr_title_update_enabled=mr_title_update_enabled,
             mr_auto_creation_enabled=mr_auto_creation_enabled,
+            mr_labeling_enabled=mr_labeling_enabled,
             housekeeping_enabled=housekeeping_enabled,
             housekeeping_stale_days=housekeeping_stale_days,
             housekeeping_max_files=housekeeping_max_files

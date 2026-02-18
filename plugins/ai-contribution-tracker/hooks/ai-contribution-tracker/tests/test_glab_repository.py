@@ -46,13 +46,13 @@ class TestGetMrForBranch:
 
     @patch("infrastructure.glab_repository.subprocess.run")
     def test_returns_mr_when_found(self, mock_run, glab):
-        """Given MR exists for branch, returns dict with iid, title, and description."""
+        """Given MR exists for branch, returns dict with iid, title, description, and labels."""
         mock_run.return_value = MagicMock(
-            stdout=json.dumps([{"iid": 42, "title": "My MR", "description": "My description"}]),
+            stdout=json.dumps([{"iid": 42, "title": "My MR", "description": "My description", "labels": ["AI:85%"]}]),
             returncode=0
         )
         result = glab.get_mr_for_branch("feature/test")
-        assert result == {"iid": "42", "title": "My MR", "description": "My description"}
+        assert result == {"iid": "42", "title": "My MR", "description": "My description", "labels": ["AI:85%"]}
 
     @patch("infrastructure.glab_repository.subprocess.run")
     def test_returns_empty_description_when_missing(self, mock_run, glab):
@@ -63,6 +63,26 @@ class TestGetMrForBranch:
         )
         result = glab.get_mr_for_branch("feature/test")
         assert result["description"] == ""
+
+    @patch("infrastructure.glab_repository.subprocess.run")
+    def test_returns_empty_labels_when_missing(self, mock_run, glab):
+        """Given MR without labels field, returns empty list."""
+        mock_run.return_value = MagicMock(
+            stdout=json.dumps([{"iid": 42, "title": "My MR"}]),
+            returncode=0
+        )
+        result = glab.get_mr_for_branch("feature/test")
+        assert result["labels"] == []
+
+    @patch("infrastructure.glab_repository.subprocess.run")
+    def test_returns_labels_when_present(self, mock_run, glab):
+        """Given MR with labels, returns them in result dict."""
+        mock_run.return_value = MagicMock(
+            stdout=json.dumps([{"iid": 1, "title": "T", "labels": ["AI:60%", "bug"]}]),
+            returncode=0
+        )
+        result = glab.get_mr_for_branch("feature/test")
+        assert result["labels"] == ["AI:60%", "bug"]
 
     @patch("infrastructure.glab_repository.subprocess.run")
     def test_returns_none_when_no_mr(self, mock_run, glab):
@@ -195,3 +215,88 @@ class TestCreateDraftMr:
     def test_returns_false_on_timeout(self, mock_run, glab):
         """Given creation times out, returns False."""
         assert glab.create_draft_mr("feature/test", "Title", "main") is False
+
+    @patch("infrastructure.glab_repository.subprocess.run")
+    def test_includes_label_when_provided(self, mock_run, glab):
+        """Given label parameter, appends --label to command."""
+        mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+        result = glab.create_draft_mr("feature/test", "Title", "main", label="AI:85%")
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        assert '--label' in call_args
+        label_index = call_args.index('--label')
+        assert call_args[label_index + 1] == "AI:85%"
+
+    @patch("infrastructure.glab_repository.subprocess.run")
+    def test_no_label_arg_when_label_is_none(self, mock_run, glab):
+        """Given no label parameter, does not append --label to command."""
+        mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+        glab.create_draft_mr("feature/test", "Title", "main")
+        call_args = mock_run.call_args[0][0]
+        assert '--label' not in call_args
+
+
+class TestAddLabel:
+
+    @patch("infrastructure.glab_repository.subprocess.run")
+    def test_returns_true_on_success(self, mock_run, glab):
+        """Given successful label add, returns True."""
+        mock_run.return_value = MagicMock(returncode=0)
+        assert glab.add_label("42", "AI:85%") is True
+
+    @patch("infrastructure.glab_repository.subprocess.run")
+    def test_calls_correct_command(self, mock_run, glab):
+        """Given add_label call, invokes glab mr update with --label."""
+        mock_run.return_value = MagicMock(returncode=0)
+        glab.add_label("42", "AI:85%")
+        mock_run.assert_called_once_with(
+            ['glab', 'mr', 'update', '42', '--label', 'AI:85%', '--yes'],
+            capture_output=True,
+            check=True,
+            timeout=10
+        )
+
+    @patch("infrastructure.glab_repository.subprocess.run",
+           side_effect=subprocess.CalledProcessError(1, "glab"))
+    def test_returns_false_on_failure(self, mock_run, glab):
+        """Given glab command fails, returns False."""
+        assert glab.add_label("42", "AI:85%") is False
+
+    @patch("infrastructure.glab_repository.subprocess.run",
+           side_effect=subprocess.TimeoutExpired("glab", 10))
+    def test_returns_false_on_timeout(self, mock_run, glab):
+        """Given timeout, returns False."""
+        assert glab.add_label("42", "AI:85%") is False
+
+
+class TestRemoveLabel:
+
+    @patch("infrastructure.glab_repository.subprocess.run")
+    def test_returns_true_on_success(self, mock_run, glab):
+        """Given successful label remove, returns True."""
+        mock_run.return_value = MagicMock(returncode=0)
+        assert glab.remove_label("42", "AI:85%") is True
+
+    @patch("infrastructure.glab_repository.subprocess.run")
+    def test_calls_correct_command(self, mock_run, glab):
+        """Given remove_label call, invokes glab mr update with --unlabel."""
+        mock_run.return_value = MagicMock(returncode=0)
+        glab.remove_label("42", "AI:85%")
+        mock_run.assert_called_once_with(
+            ['glab', 'mr', 'update', '42', '--unlabel', 'AI:85%', '--yes'],
+            capture_output=True,
+            check=True,
+            timeout=10
+        )
+
+    @patch("infrastructure.glab_repository.subprocess.run",
+           side_effect=subprocess.CalledProcessError(1, "glab"))
+    def test_returns_false_on_failure(self, mock_run, glab):
+        """Given glab command fails, returns False."""
+        assert glab.remove_label("42", "AI:85%") is False
+
+    @patch("infrastructure.glab_repository.subprocess.run",
+           side_effect=subprocess.TimeoutExpired("glab", 10))
+    def test_returns_false_on_timeout(self, mock_run, glab):
+        """Given timeout, returns False."""
+        assert glab.remove_label("42", "AI:85%") is False

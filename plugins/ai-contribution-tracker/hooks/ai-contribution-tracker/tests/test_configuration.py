@@ -172,6 +172,77 @@ class TestConfigurationLoaderMrAutoCreation:
         assert ConfigurationLoader.DEFAULT_CONFIG['mr']['autoCreationEnabled'] is False
 
 
+class TestConfigurationMrLabeling:
+    """Tests for mr_labeling_enabled property."""
+
+    @pytest.mark.parametrize("value,expected", [
+        (True, True),
+        (False, False),
+    ])
+    def test_mr_labeling_enabled_reflects_init_value(self, value, expected):
+        """Given mr_labeling_enabled set to value, property returns expected."""
+        config = Configuration(
+            enabled=True,
+            base_branches=["main"],
+            tracked_extensions={".py"},
+            enable_logging=False,
+            log_file="test.log",
+            mr_labeling_enabled=value,
+        )
+        assert config.mr_labeling_enabled is expected
+
+    def test_mr_labeling_enabled_default_is_false(self):
+        """Given no mr_labeling_enabled arg, defaults to False."""
+        config = Configuration(
+            enabled=True,
+            base_branches=["main"],
+            tracked_extensions={".py"},
+            enable_logging=False,
+            log_file="test.log",
+        )
+        assert config.mr_labeling_enabled is False
+
+
+class TestConfigurationLoaderMrLabeling:
+    """Tests for ConfigurationLoader loading mr.labelingEnabled."""
+
+    @pytest.mark.parametrize("labeling_value,expected", [
+        (True, True),
+        (False, False),
+    ])
+    def test_load_with_labeling_enabled_field(self, tmp_path, labeling_value, expected):
+        """Given config with mr.labelingEnabled, loads correctly."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "enabled": True,
+            "base_branches": ["main"],
+            "tracked_extensions": [".py"],
+            "enable_logging": False,
+            "log_file": "test.log",
+            "mr": {"labelingEnabled": labeling_value},
+        }))
+        config = ConfigurationLoader.load(config_file)
+        assert config.mr_labeling_enabled is expected
+
+    def test_load_without_labeling_field_defaults_to_false(self, tmp_path):
+        """Given config without labelingEnabled field, defaults to False."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "enabled": True,
+            "base_branches": ["main"],
+            "tracked_extensions": [".py"],
+            "enable_logging": False,
+            "log_file": "test.log",
+            "mr": {"titleUpdateEnabled": True},
+        }))
+        config = ConfigurationLoader.load(config_file)
+        assert config.mr_labeling_enabled is False
+
+    def test_default_config_has_labeling_field(self):
+        """DEFAULT_CONFIG includes mr.labelingEnabled=False."""
+        assert ConfigurationLoader.DEFAULT_CONFIG['mr']['labelingEnabled'] is False
+
+
 class TestConfigResolveConfigPath:
     """Tests for ConfigurationLoader.resolve_config_path()."""
 
