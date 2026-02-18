@@ -1,4 +1,5 @@
 {
   "name": "ai-contribution-tracker",
+  "version": "0.0.2",
   "description": "Track and report AI assistant contributions to the codebase"
 }
