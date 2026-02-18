@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "name": "eug-msv-claude-marketplace",
   "description": "Plugin marketplace for Claude Code from Eugene Moiseev",
-  "updated": "2026-02-17",
+  "updated": "2026-02-18",
   "owner": {
     "name": "Eugene Moiseev",
     "url": "https://github.com/EugeneMsv"
@@ -13,7 +13,7 @@
       "name": "ai-contribution-tracker",
       "source": "./plugins/ai-contribution-tracker",
       "description": "Track and report AI assistant contributions to the codebase",
-      "version": "0.0.1",
+      "version": "0.0.2",
       "author": {
         "name": "Eugene Moiseev"
       },
