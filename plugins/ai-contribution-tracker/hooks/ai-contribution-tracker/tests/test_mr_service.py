@@ -13,6 +13,7 @@ from domain.contribution_stats import (
     ContributorStats,
     LineStats,
 )
+from infrastructure.glab_repository import MrInfo
 from services.mr_service import MrService
 
 
@@ -233,12 +234,12 @@ class TestProcessPushFlagIndependence:
     def _setup(self, service, git_repo, glab_repo, existing_labels=None, ai_pct=85.0, title="My MR"):
         """Wire up mocks for a successful process_push run."""
         git_repo.get_current_branch.return_value = "feature/test"
-        glab_repo.get_mr_for_branch.return_value = {
-            'iid': '42',
-            'title': title,
-            'description': '',
-            'labels': existing_labels or [],
-        }
+        glab_repo.get_mr_for_branch.return_value = MrInfo(
+            iid='42',
+            title=title,
+            description='',
+            labels=existing_labels or [],
+        )
         git_repo.get_root.return_value = Path("/fake/root")
         glab_repo.update_mr.return_value = True
         return _make_tracking_mock(ai_pct)

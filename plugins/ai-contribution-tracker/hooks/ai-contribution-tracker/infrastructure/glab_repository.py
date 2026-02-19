@@ -4,11 +4,22 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import dataclass, field
 from logging import Logger
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 if TYPE_CHECKING:
     from services.mr_service import MrUpdateRequest
+
+
+@dataclass
+class MrInfo:
+    """Immutable snapshot of a GitLab MR returned by glab."""
+
+    iid: str
+    title: str
+    description: str = ''
+    labels: List[str] = field(default_factory=list)
 
 
 class GlabRepository:
@@ -44,14 +55,14 @@ class GlabRepository:
         except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
             return False
 
-    def get_mr_for_branch(self, branch: str) -> Optional[Dict]:
+    def get_mr_for_branch(self, branch: str) -> Optional[MrInfo]:
         """Find an open MR for the given source branch.
 
         Args:
             branch: Source branch name
 
         Returns:
-            Dict with 'iid', 'title', 'description', and 'labels' keys, or None if no MR found
+            MrInfo for the first open MR, or None if no MR found
         """
         try:
             result = subprocess.run(
@@ -71,12 +82,12 @@ class GlabRepository:
                 self._logger.warning(f"Multiple MRs found for branch {branch}, using first")
 
             mr = mrs[0]
-            return {
-                'iid': str(mr['iid']),
-                'title': mr['title'],
-                'description': mr.get('description', ''),
-                'labels': mr.get('labels', [])
-            }
+            return MrInfo(
+                iid=str(mr['iid']),
+                title=mr['title'],
+                description=mr.get('description', ''),
+                labels=mr.get('labels', []),
+            )
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
             self._logger.warning(f"glab mr list failed: {e}")
             return None

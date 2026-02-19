@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from infrastructure.glab_repository import GlabRepository
+from infrastructure.glab_repository import GlabRepository, MrInfo
 from services.mr_service import MrUpdateRequest
 
 
@@ -47,43 +47,44 @@ class TestGetMrForBranch:
 
     @patch("infrastructure.glab_repository.subprocess.run")
     def test_returns_mr_when_found(self, mock_run, glab):
-        """Given MR exists for branch, returns dict with iid, title, description, and labels."""
+        """Given MR exists for branch, returns MrInfo with all fields populated."""
         mock_run.return_value = MagicMock(
             stdout=json.dumps([{"iid": 42, "title": "My MR", "description": "My description", "labels": ["AI:85%"]}]),
             returncode=0
         )
         result = glab.get_mr_for_branch("feature/test")
-        assert result == {"iid": "42", "title": "My MR", "description": "My description", "labels": ["AI:85%"]}
+        assert isinstance(result, MrInfo)
+        assert result == MrInfo(iid="42", title="My MR", description="My description", labels=["AI:85%"])
 
     @patch("infrastructure.glab_repository.subprocess.run")
     def test_returns_empty_description_when_missing(self, mock_run, glab):
-        """Given MR without description field, returns empty string."""
+        """Given MR without description field, description defaults to empty string."""
         mock_run.return_value = MagicMock(
             stdout=json.dumps([{"iid": 42, "title": "My MR"}]),
             returncode=0
         )
         result = glab.get_mr_for_branch("feature/test")
-        assert result["description"] == ""
+        assert result.description == ""
 
     @patch("infrastructure.glab_repository.subprocess.run")
     def test_returns_empty_labels_when_missing(self, mock_run, glab):
-        """Given MR without labels field, returns empty list."""
+        """Given MR without labels field, labels defaults to empty list."""
         mock_run.return_value = MagicMock(
             stdout=json.dumps([{"iid": 42, "title": "My MR"}]),
             returncode=0
         )
         result = glab.get_mr_for_branch("feature/test")
-        assert result["labels"] == []
+        assert result.labels == []
 
     @patch("infrastructure.glab_repository.subprocess.run")
     def test_returns_labels_when_present(self, mock_run, glab):
-        """Given MR with labels, returns them in result dict."""
+        """Given MR with labels, labels field is populated."""
         mock_run.return_value = MagicMock(
             stdout=json.dumps([{"iid": 1, "title": "T", "labels": ["AI:60%", "bug"]}]),
             returncode=0
         )
         result = glab.get_mr_for_branch("feature/test")
-        assert result["labels"] == ["AI:60%", "bug"]
+        assert result.labels == ["AI:60%", "bug"]
 
     @patch("infrastructure.glab_repository.subprocess.run")
     def test_returns_none_when_no_mr(self, mock_run, glab):
@@ -102,7 +103,7 @@ class TestGetMrForBranch:
             returncode=0
         )
         result = glab.get_mr_for_branch("feature/multi")
-        assert result["iid"] == "10"
+        assert result.iid == "10"
 
     @patch("infrastructure.glab_repository.subprocess.run",
            side_effect=subprocess.CalledProcessError(1, "glab"))

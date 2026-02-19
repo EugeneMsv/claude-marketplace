@@ -6,7 +6,7 @@ from logging import Logger
 from typing import Optional
 from domain.contribution_stats import ContributionStats
 from infrastructure.git_repository import GitRepository
-from infrastructure.glab_repository import GlabRepository
+from infrastructure.glab_repository import GlabRepository, MrInfo
 from infrastructure.configuration import Configuration
 from infrastructure.tracking_repository import TrackingRepository
 
@@ -111,7 +111,7 @@ class MrService:
             self._logger.info("Auto-creation disabled, skipping")
             return MrResult(False, message="ℹ️ No MR found (auto-creation disabled)")
 
-        self._logger.info(f"Found MR !{mr['iid']}: {mr['title']}")
+        self._logger.info(f"Found MR !{mr.iid}: {mr.title}")
 
         # Load tracking data with pre-calculated stats
         git_root = self._git_repo.get_root()
@@ -141,7 +141,7 @@ class MrService:
             self._logger.info("No MR changes requested by active flags")
             return MrResult(False)
 
-        success = self._glab_repo.update_mr(mr['iid'], update_request)
+        success = self._glab_repo.update_mr(mr.iid, update_request)
         if success:
             self._logger.info("=== MR updated ===")
         ai_percentage = int(round(stats.ai_percentage)) if success else None
@@ -205,33 +205,33 @@ class MrService:
                 return MrResult(success, None, message=f"✓ Draft MR created: {title}")
         return MrResult(success, ai_percentage)
 
-    def _apply_title_update(self, mr: dict, stats: ContributionStats, request: MrUpdateRequest) -> None:
+    def _apply_title_update(self, mr: MrInfo, stats: ContributionStats, request: MrUpdateRequest) -> None:
         """Populate request.title if title update is enabled and title would change."""
         if not self._config.mr_title_update_enabled:
             return
-        new_title = self._build_new_title(mr['title'], stats)
-        if new_title != mr['title']:
+        new_title = self._build_new_title(mr.title, stats)
+        if new_title != mr.title:
             request.title = new_title
         else:
             self._logger.info("Title unchanged, skipping title update")
 
-    def _apply_description_update(self, mr: dict, stats: ContributionStats, request: MrUpdateRequest) -> None:
+    def _apply_description_update(self, mr: MrInfo, stats: ContributionStats, request: MrUpdateRequest) -> None:
         """Populate request.description if description update is enabled and description would change."""
         if not self._config.mr_description_update_enabled:
             return
-        new_description = self._merge_description(mr.get('description', ''), stats)
-        if new_description != mr.get('description', ''):
+        new_description = self._merge_description(mr.description, stats)
+        if new_description != mr.description:
             request.description = new_description
         else:
             self._logger.info("Description unchanged, skipping description update")
 
-    def _apply_label_update(self, mr: dict, stats: ContributionStats, request: MrUpdateRequest) -> None:
+    def _apply_label_update(self, mr: MrInfo, stats: ContributionStats, request: MrUpdateRequest) -> None:
         """Populate request label fields if labeling is enabled and label would change."""
         if not self._config.mr_labeling_enabled:
             return
         new_label = self._ai_label(stats)
         existing_ai_label = next(
-            (lbl for lbl in mr.get('labels', []) if AI_LABEL_PATTERN.match(lbl)),
+            (lbl for lbl in mr.labels if AI_LABEL_PATTERN.match(lbl)),
             None
         )
         if existing_ai_label is None:
