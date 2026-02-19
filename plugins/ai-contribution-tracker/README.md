@@ -26,8 +26,8 @@ Automatically tracks AI vs human contributions in your codebase and injects stat
 - **Git Diff-Based**: Only counts changes in your branch (not pre-existing code)
 - **Commit Stats**: Automatically appends contribution stats to commit messages
 - **Fast**: File-first hash structure for 50x faster lookups
-- **MR Title Stats**: Optionally updates GitLab MR titles with compact AI contribution tag on push (disabled by default)
-- **MR Description Stats**: Automatically includes detailed contribution breakdown in MR descriptions with preserved existing content
+- **MR Title Stats**: Optionally updates GitLab MR titles with compact `[AI: X%]` tag on push (disabled by default)
+- **MR Description Stats**: Optionally includes detailed contribution breakdown in MR descriptions with preserved existing content (disabled by default, independent of title update)
 - **MR Auto-Creation**: Optionally creates draft MRs automatically on first push when no MR exists (disabled by default)
 - **MR AI Labeling**: Optionally attaches a GitLab label (`AI:85%`) reflecting the AI contribution percentage; auto-updates on subsequent pushes (disabled by default)
 - **Automatic Housekeeping**: Cleans up stale tracking files for deleted/merged branches
@@ -53,7 +53,7 @@ Before using the AI Contribution Tracker, ensure the following requirements are 
 3. **Format Post Hook** (PostToolUse Bash): Updates AI attribution after formatting using token-based matching
 4. **Inject Hook** (PostToolUse Bash): On commit, calculates stats and amends commit message
 5. **Housekeeping**: Automatically cleans up stale tracking files during inject hook
-6. **MR Update Hook** (PostToolUse Bash): On push, updates GitLab MR title with `[AI: X%]` tag, attaches/updates an `AI:X%` label, and/or auto-creates draft MR if none exists (all opt-in)
+6. **MR Update Hook** (PostToolUse Bash): On push, independently applies any enabled MR features — title tag, description stats, `AI:X%` label, and/or draft MR auto-creation (all opt-in, each flag independent)
 7. **Git Diff Analysis**: Uses `git diff <merge-base> HEAD` to count only branch changes
 
 **Format Attribution Preservation**:
@@ -172,6 +172,7 @@ Edit `config.json` to customize:
   "log_file": "ai-tracker.log",
   "mr": {
     "titleUpdateEnabled": false,
+    "descriptionUpdateEnabled": false,
     "autoCreationEnabled": false,
     "labelingEnabled": false
   },
@@ -189,7 +190,8 @@ Edit `config.json` to customize:
 - `tracked_extensions` - File types to track
 - `enable_logging` - Enable/disable debug logging
 - `log_file` - Log file name
-- `mr.titleUpdateEnabled` - Update existing MR titles with `[AI: X%]` tag on push (default: false)
+- `mr.titleUpdateEnabled` - Append/update `[AI: X%]` tag in existing MR titles on push (default: false)
+- `mr.descriptionUpdateEnabled` - Append/update AI stats section in existing MR descriptions on push (default: false)
 - `mr.autoCreationEnabled` - Auto-create draft MR on first push when none exists (default: false)
 - `mr.labelingEnabled` - Attach/update an `AI:X%` GitLab label on the MR on every push (default: false)
 - `housekeeping.enabled` - Automatically clean up stale tracking files (default: true)
@@ -198,7 +200,7 @@ Edit `config.json` to customize:
 
 ## MR Title Stats, Auto-Creation & Labeling
 
-The tracker provides four GitLab MR features:
+The tracker provides four independent GitLab MR features, each controlled by its own flag. Any combination can be enabled simultaneously; enabling one does not activate the others.
 
 ### 1. MR Title Updates
 
@@ -219,9 +221,9 @@ Automatically appends a compact `[AI: X%]` tag to GitLab MR titles after `git pu
 - Tag push (`--tags`) is ignored
 - All errors are logged but never block the push
 
-### 1.5. MR Description Stats
+### 2. MR Description Stats
 
-Automatically includes detailed contribution statistics in GitLab MR descriptions. This feature works alongside title updates and preserves any existing description content.
+Independently appends detailed contribution statistics to GitLab MR descriptions on every push. Controlled by `descriptionUpdateEnabled` — can be enabled without enabling title updates. Preserves all existing description content.
 
 **Example MR Description:**
 ```markdown
@@ -242,7 +244,7 @@ Overall: +150 -50
 
 
 **How it works:**
-1. Runs after every `git push` alongside title update
+1. Runs after every `git push` (PostToolUse Bash hook)
 2. Fetches current MR description
 3. Strips existing stats section if present
 4. Appends new stats section with latest data
@@ -252,12 +254,12 @@ Overall: +150 -50
 - Stats section uses markdown heading `## AI Contribution Stats` with code fence
 - Existing stats section is replaced (identified by heading + code fence pattern)
 - All other description content is preserved unchanged
-- Works for both existing MRs and auto-created MRs
+- Runs independently of title updates — either or both can be enabled
 - All errors are logged but never block the push
 
-### 2. MR Auto-Creation
+### 3. MR Auto-Creation
 
-Automatically creates a draft MR on first `git push` when no MR exists for the branch. The MR title is derived from the branch name and includes AI stats in both title and description if available.
+Automatically creates a draft MR on first `git push` when no MR exists for the branch. The MR title is derived from the branch name. AI stats are added to the title, description, and/or label only when the respective flags (`titleUpdateEnabled`, `descriptionUpdateEnabled`, `labelingEnabled`) are also enabled.
 
 **Branch Title Derivation:**
 - Extracts Jira ticket (case-insensitive, uppercased)
@@ -265,10 +267,12 @@ Automatically creates a draft MR on first `git push` when no MR exists for the b
 - Humanizes remaining text (replaces `-`/`_` with spaces, capitalizes first word)
 - Appends `[AI: X%]` tag if tracking stats available
 
-**Examples:**
+**Examples** (with `titleUpdateEnabled: true`):
 - `feature/PROJ-12345-add-login` → `PROJ-12345 Add login [AI: 90%]`
 - `bugfix/proj-999-fix-auth` → `PROJ-999 Fix auth [AI: 75%]`
 - `feature/some-feature` → `Some feature` (no stats yet)
+
+With `titleUpdateEnabled: false`: title is always the plain derived name with no AI tag.
 
 **Target Branch Resolution:**
 - Traverses `base_branches` list from config (e.g., `["main", "master", "develop"]`)
@@ -281,18 +285,19 @@ Automatically creates a draft MR on first `git push` when no MR exists for the b
 3. If no MR found and auto-creation enabled:
    - Resolves target branch from config
    - Derives title from branch name
-   - Optionally appends `[AI: X%]` tag to title if stats available
-   - Includes detailed stats in description if tracking data exists
+   - Appends `[AI: X%]` tag to title if `titleUpdateEnabled` and stats available
+   - Includes stats in description if `descriptionUpdateEnabled` and stats available
+   - Attaches `AI:X%` label if `labelingEnabled` and stats available
    - Creates draft MR via `glab mr create --draft`
 
 **Behavior:**
-- MR is always created in draft state
-- MR created even without tracking stats (title without AI tag, empty description)
-- Description includes detailed contribution breakdown when stats available
+- MR is always created in draft state regardless of which flags are set
+- MR created even without tracking stats (plain title, empty description, no label)
+- Each AI enrichment (title tag, description, label) requires its own flag to be enabled
 - Target branch selected automatically from config
 - All errors are logged but never block the push
 
-### 3. MR AI Labeling
+### 4. MR AI Labeling
 
 Automatically attaches a GitLab label reflecting the integer AI contribution percentage (e.g., `AI:85%`) to the MR on every push. On subsequent pushes, the old label is replaced if the percentage changed, or skipped if it is the same.
 
@@ -322,6 +327,7 @@ Automatically attaches a GitLab label reflecting the integer AI contribution per
 {
   "mr": {
     "titleUpdateEnabled": true,
+    "descriptionUpdateEnabled": true,
     "autoCreationEnabled": false,
     "labelingEnabled": true
   }
@@ -329,9 +335,12 @@ Automatically attaches a GitLab label reflecting the integer AI contribution per
 ```
 
 **Options:**
-- `titleUpdateEnabled` - Append/update `[AI: X%]` tag in existing MR titles and descriptions on push
-- `autoCreationEnabled` - Auto-create draft MR on first push when none exists (includes description stats)
+- `titleUpdateEnabled` - Append/update `[AI: X%]` tag in existing MR titles on push
+- `descriptionUpdateEnabled` - Append/update AI stats section in existing MR descriptions on push
+- `autoCreationEnabled` - Auto-create draft MR on first push when none exists
 - `labelingEnabled` - Attach/update an `AI:X%` GitLab label on the MR on every push
+
+All four flags are **fully independent** — any combination can be enabled.
 
 **Prerequisites:**
 - `glab` CLI installed and authenticated (`glab auth login`)
@@ -340,10 +349,10 @@ Automatically attaches a GitLab label reflecting the integer AI contribution per
 - For labeling: Works with both existing and auto-created MRs
 
 **Notes:**
-- Description stats are always included when title updates are enabled
-- Existing description content is always preserved - only the stats section is updated
+- Title and description updates are separate — enabling one does not enable the other
+- Existing description content is always preserved — only the `## AI Contribution Stats` section is updated
 - Stats section can be manually removed from description without affecting future updates
-- Labeling can be enabled independently of title update or auto-creation
+- When all four flags are off, the hook exits immediately without calling `glab`
 
 ## Automatic Housekeeping
 
