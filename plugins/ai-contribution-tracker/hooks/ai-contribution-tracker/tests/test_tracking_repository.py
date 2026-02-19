@@ -214,6 +214,63 @@ class TestMigration:
         assert removed[removed_hash] == 1
 
 
+class TestPendingInjectHead:
+    """Tests for pending_inject_head field persistence."""
+
+    def test_pending_inject_head_roundtrip(self, tracking_repo):
+        """Given pending_inject_head set, roundtrip preserves value."""
+        tracking = TrackingData("test-branch")
+        tracking.pending_inject_head = "abc123def456"
+
+        tracking_repo.save(tracking)
+        loaded = tracking_repo.load()
+
+        assert loaded is not None
+        assert loaded.pending_inject_head == "abc123def456"
+
+    def test_pending_inject_head_defaults_to_none(self, tracking_repo):
+        """Given tracking data without pending_inject_head, loads as None."""
+        tracking = TrackingData("test-branch")
+        tracking_repo.save(tracking)
+        loaded = tracking_repo.load()
+
+        assert loaded is not None
+        assert loaded.pending_inject_head is None
+
+    def test_pending_inject_head_absent_in_old_file_loads_as_none(self, tracking_repo):
+        """Given old tracking file without pending_inject_head key, loads as None."""
+        old_data = {
+            "branch": "test-branch",
+            "merge_base": None,
+            "files_tracked": [],
+            "stats": None,
+            "last_updated": None,
+            "ai_line_hashes": {},
+            "ai_removed_line_hashes": {}
+        }
+
+        tracking_repo.tracking_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(tracking_repo.tracking_path, 'w') as f:
+            json.dump(old_data, f)
+
+        loaded = tracking_repo.load()
+
+        assert loaded is not None
+        assert loaded.pending_inject_head is None
+
+    def test_pending_inject_head_cleared_to_none_saves_none(self, tracking_repo):
+        """Given pending_inject_head set then cleared, roundtrip preserves None."""
+        tracking = TrackingData("test-branch")
+        tracking.pending_inject_head = "abc123"
+        tracking_repo.save(tracking)
+
+        tracking.pending_inject_head = None
+        tracking_repo.save(tracking)
+
+        loaded = tracking_repo.load()
+        assert loaded.pending_inject_head is None
+
+
 class TestErrorHandling:
     """Tests for error handling."""
 

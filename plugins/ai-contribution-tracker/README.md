@@ -11,6 +11,8 @@ Automatically tracks AI vs human contributions in your codebase and injects stat
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [MR Title Stats, Auto-Creation & Labeling](#mr-title-stats-auto-creation--labeling)
+- [Missed Commit Recovery](#missed-commit-recovery)
+- [Automatic Housekeeping](#automatic-housekeeping)
 - [Example](#example)
 - [Tracking Files](#tracking-files)
 - [Disabling](#disabling)
@@ -30,6 +32,7 @@ Automatically tracks AI vs human contributions in your codebase and injects stat
 - **MR Description Stats**: Optionally includes detailed contribution breakdown in MR descriptions with preserved existing content (disabled by default, independent of title update)
 - **MR Auto-Creation**: Optionally creates draft MRs automatically on first push when no MR exists (disabled by default)
 - **MR AI Labeling**: Optionally attaches a GitLab label (`AI:85%`) reflecting the AI contribution percentage; auto-updates on subsequent pushes (disabled by default)
+- **Missed Commit Recovery**: Automatically recovers AI stats injection for commits made inside chained commands that partially failed (e.g. `git add && git commit && git push` where push fails)
 - **Automatic Housekeeping**: Cleans up stale tracking files for deleted/merged branches
 - **Configurable**: Support for multiple base branches, file extensions, and logging
 
@@ -49,12 +52,13 @@ Before using the AI Contribution Tracker, ensure the following requirements are 
 ## How It Works
 
 1. **Capture Hook** (PostToolUse Write/Edit): Records hashes of AI-written lines
-2. **Format Pre Hook** (PreToolUse Bash): Captures file state before formatting commands
-3. **Format Post Hook** (PostToolUse Bash): Updates AI attribution after formatting using token-based matching
-4. **Inject Hook** (PostToolUse Bash): On commit, calculates stats and amends commit message
-5. **Housekeeping**: Automatically cleans up stale tracking files during inject hook
-6. **MR Update Hook** (PostToolUse Bash): On push, independently applies any enabled MR features — title tag, description stats, `AI:X%` label, and/or draft MR auto-creation (all opt-in, each flag independent)
-7. **Git Diff Analysis**: Uses `git diff <merge-base> HEAD` to count only branch changes
+2. **Commit Pre Hook** (PreToolUse Bash): Before a `git commit`, records the current HEAD hash into the tracking file as a commit intent marker
+3. **Format Pre Hook** (PreToolUse Bash): Captures file state before formatting commands
+4. **Format Post Hook** (PostToolUse Bash): Updates AI attribution after formatting using token-based matching
+5. **Inject Hook** (PostToolUse Bash): On commit, calculates stats and amends commit message; on `git push`, checks for a pending commit intent and recovers any missed injection
+6. **Housekeeping**: Automatically cleans up stale tracking files during inject hook
+7. **MR Update Hook** (PostToolUse Bash): On push, independently applies any enabled MR features — title tag, description stats, `AI:X%` label, and/or draft MR auto-creation (all opt-in, each flag independent)
+8. **Git Diff Analysis**: Uses `git diff <merge-base> HEAD` to count only branch changes
 
 **Format Attribution Preservation**:
 - Automatically detects formatting commands: `spotlessApply`, `prettier`, `black`, `eslint --fix`, `gofmt`, `rustfmt`, `clang-format`
@@ -141,9 +145,9 @@ Hooks are configured in `~/.claude/settings.json`:
 ```
 
 **Hook Execution Order:**
-1. **PreToolUse Bash** → `ai-tracker-format-pre.py` (captures state before formatting)
+1. **PreToolUse Bash** → `ai-tracker-format-pre.py` (captures state before formatting), `ai-tracker-commit-pre.py` (records commit intent before git commit)
 2. **PostToolUse Write/Edit** → `ai-tracker-capture.py` (records AI-written lines)
-3. **PostToolUse Bash** → `ai-tracker-inject.py` (injects stats on commit), then `ai-tracker-mr-update.py` (updates MR title on push), then `ai-tracker-format-post.py` (updates attribution after formatting)
+3. **PostToolUse Bash** → `ai-tracker-inject.py` (injects stats on commit, recovers missed injection on push), then `ai-tracker-mr-update.py` (updates MR on push), then `ai-tracker-format-post.py` (updates attribution after formatting)
 
 ## Configuration
 
@@ -354,6 +358,25 @@ All four flags are **fully independent** — any combination can be enabled.
 - Stats section can be manually removed from description without affecting future updates
 - When all four flags are off, the hook exits immediately without calling `glab`
 
+## Missed Commit Recovery
+
+When Claude runs a chained command like `git add && git commit && git push` and the push fails, Claude Code skips the PostToolUse event entirely — so the inject hook never fires and the commit is left without AI stats.
+
+**How recovery works:**
+
+1. Before any `git commit` runs, the Commit Pre Hook records the current HEAD hash into the branch tracking file as a "commit intent" marker.
+2. If the push fails and PostToolUse is skipped, the marker stays in the tracking file.
+3. The next time `git push` is run on that branch, the inject hook detects the marker, confirms that HEAD has changed (meaning the commit actually happened), and retroactively injects AI stats into that commit by amending it.
+4. If the commit itself never completed (e.g. the commit step also failed), the marker is cleared without any action.
+
+**Guard conditions** — recovery is skipped when:
+- No tracking file exists for the branch
+- No commit intent marker is present
+- HEAD is unchanged since the marker was written (commit never happened)
+- The commit message already contains stats (already injected via the normal path)
+
+**Result:** No commit on a tracked branch is left without AI stats, regardless of whether it was part of a chained command that partially failed.
+
 ## Automatic Housekeeping
 
 The tracker automatically cleans up stale tracking files for branches that have been deleted or merged.
@@ -524,7 +547,8 @@ Per-branch tracking files are stored in `.claude/ai-tracking-{branch}.json`:
 ## Structure
 
 - `ai-tracker-capture.py` - Capture hook entry point (PostToolUse Write/Edit)
-- `ai-tracker-inject.py` - Inject hook entry point (PostToolUse Bash - commits)
+- `ai-tracker-commit-pre.py` - Commit pre-hook entry point (PreToolUse Bash - records commit intent before git commit)
+- `ai-tracker-inject.py` - Inject hook entry point (PostToolUse Bash - injects stats on commit, recovers missed injection on push)
 - `ai-tracker-mr-update.py` - MR update hook entry point (PostToolUse Bash - push)
 - `ai-tracker-format-pre.py` - Format pre-hook entry point (PreToolUse Bash)
 - `ai-tracker-format-post.py` - Format post-hook entry point (PostToolUse Bash - formatting)
