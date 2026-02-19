@@ -160,6 +160,40 @@ class GitRepository:
             # Return empty diff on error
             return Diff(merge_base, {})
 
+    def get_head_commit_hash(self) -> Optional[str]:
+        """Get the current HEAD commit hash.
+
+        Returns:
+            40-character SHA hash of HEAD, or None on error
+        """
+        try:
+            result = subprocess.run(
+                ['git', 'rev-parse', 'HEAD'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            return result.stdout.strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return None
+
+    def get_head_commit_message(self) -> Optional[str]:
+        """Get the commit message of the current HEAD commit.
+
+        Returns:
+            Commit message string, or None on error
+        """
+        try:
+            result = subprocess.run(
+                ['git', 'log', '-1', '--format=%B'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            return result.stdout.strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return None
+
     @staticmethod
     def sanitize_branch_name(branch: str) -> str:
         """Sanitize branch name for use in filenames.

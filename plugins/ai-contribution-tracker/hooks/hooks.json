@@ -9,6 +9,11 @@
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-contribution-tracker/ai-tracker-format-pre.py",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-contribution-tracker/ai-tracker-commit-pre.py",
+            "timeout": 10
           }
         ]
       }

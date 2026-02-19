@@ -1,6 +1,5 @@
 """Inject service for AI contribution tracking."""
 
-import re
 import subprocess
 from datetime import datetime
 from logging import Logger
@@ -54,28 +53,17 @@ class InjectService:
         self._stats_calculator = stats_calculator
         self._logger = logger
 
-    def process_commit(self, command: str) -> InjectResult:
-        """Process a git commit command.
+    def process_commit(self) -> InjectResult:
+        """Inject AI contribution stats into the current HEAD commit.
 
-        Args:
-            command: Bash command that was executed
+        Caller is responsible for ensuring this is only invoked for a non-amend
+        git commit command.
 
         Returns:
             InjectResult with success status and AI percentage if successful
         """
-        # Check if this is a git commit command
-        if not command or not re.search(r'\bgit\s+commit\s+', command):
-            self._logger.info("Not a git commit command, exiting")
-            return InjectResult(False)
+        self._logger.info("Processing commit injection")
 
-        # Skip if already an amend (avoid infinite loop)
-        if '--amend' in command:
-            self._logger.info("Already an amend command, skipping")
-            return InjectResult(False)
-
-        self._logger.info("Git commit command detected")
-
-        # Get current branch
         branch = self._git_repo.get_current_branch()
         if not branch:
             self._logger.warning("Could not get current branch")
@@ -83,13 +71,11 @@ class InjectService:
 
         self._logger.info(f"Current branch: {branch}")
 
-        # Get git root
         git_root = self._git_repo.get_root()
         if not git_root:
             self._logger.warning("Could not get git root directory")
             return InjectResult(False)
 
-        # Load tracking data
         sanitized_branch = GitRepository.sanitize_branch_name(branch)
         tracking_repo = TrackingRepository(git_root, sanitized_branch)
 
@@ -102,13 +88,79 @@ class InjectService:
 
         self._logger.info(f"Loaded tracking data, {len(tracking.files_tracked)} files tracked")
 
+        return self._do_inject(tracking, tracking_repo)
+
+    def recover_missed_commit(self) -> InjectResult:
+        """Recover injection for a commit that was missed due to chained command failure.
+
+        When a chained bash command like `git add && git commit && git push` fails
+        at the push step, PostToolUse is never dispatched. The pre-hook recorded the
+        HEAD hash before the commit ran. This method detects the discrepancy and
+        injects stats into the now-existing commit.
+
+        Returns:
+            InjectResult with success status if recovery injected, otherwise False
+        """
+        git_root = self._git_repo.get_root()
+        if not git_root:
+            return InjectResult(False)
+
+        branch = self._git_repo.get_current_branch()
+        if not branch:
+            return InjectResult(False)
+
+        sanitized_branch = GitRepository.sanitize_branch_name(branch)
+        tracking_repo = TrackingRepository(git_root, sanitized_branch)
+        tracking = tracking_repo.load()
+
+        if not tracking:
+            return InjectResult(False)
+
+        pending = tracking.pending_inject_head
+        if not pending:
+            # No commit intent was recorded — nothing to recover
+            return InjectResult(False)
+
+        current_head = self._git_repo.get_head_commit_hash()
+
+        if pending == current_head:
+            # HEAD didn't change — the commit step never succeeded
+            tracking.pending_inject_head = None
+            tracking_repo.save(tracking)
+            self._logger.info("Commit intent present but HEAD unchanged — commit failed, clearing flag")
+            return InjectResult(False)
+
+        commit_message = self._git_repo.get_head_commit_message()
+        if commit_message and "Overall: +" in commit_message:
+            # Already injected (e.g. normal path ran on a later call)
+            tracking.pending_inject_head = None
+            tracking_repo.save(tracking)
+            self._logger.info("Commit already has stats, clearing flag")
+            return InjectResult(False)
+
+        self._logger.info(f"Recovering missed inject: head_before={pending[:8]}, head_now={current_head[:8] if current_head else '?'}")
+        result = self._do_inject(tracking, tracking_repo)
+        if result.success:
+            self._logger.info("=== Recovered missed commit injection ===")
+        return result
+
+    def _do_inject(self, tracking: TrackingData, tracking_repo: TrackingRepository) -> InjectResult:
+        """Calculate stats and amend the current HEAD commit message.
+
+        Shared by both process_commit and recover_missed_commit. Clears
+        pending_inject_head on completion (success or failure after stats save).
+
+        Args:
+            tracking: Loaded TrackingData to use and update
+            tracking_repo: Repository to persist updated tracking data
+
+        Returns:
+            InjectResult with success status and AI percentage
+        """
         # Always recalculate merge_base (handles merge/rebase correctly)
-        tracking.merge_base = self._git_repo.get_merge_base(
-            self._config.base_branches
-        )
+        tracking.merge_base = self._git_repo.get_merge_base(self._config.base_branches)
         self._logger.info(f"merge_base: {tracking.merge_base}")
 
-        # Get diff and calculate stats
         if not tracking.merge_base:
             return InjectResult(False)
 
@@ -117,35 +169,25 @@ class InjectService:
 
         self._logger.info(f"Stats: {stats.ai_lines} AI, {stats.human_lines} human")
 
-        # Update tracking data with stats
+        # Update tracking data with stats and clear commit intent flag
         tracking.stats = stats.to_dict()
         tracking.last_updated = datetime.now().isoformat()
+        tracking.pending_inject_head = None
         tracking_repo.save(tracking)
 
         self._logger.info("Tracking file updated with stats")
 
-        # Get last commit message
-        try:
-            result = subprocess.run(
-                ['git', 'log', '-1', '--format=%B'],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            original_message = result.stdout.strip()
-        except subprocess.CalledProcessError:
+        original_message = self._git_repo.get_head_commit_message()
+        if not original_message:
             return InjectResult(False)
 
         self._logger.info(f"Original message: {original_message[:50]}...")
 
-        # Format and append stats
         stats_msg = stats.format_message()
-
         new_message = f"{original_message}\n\n{stats_msg}"
 
         self._logger.info("New message with stats appended")
 
-        # Amend commit with new message
         try:
             subprocess.run(
                 ['git', 'commit', '--amend', '-m', new_message],
