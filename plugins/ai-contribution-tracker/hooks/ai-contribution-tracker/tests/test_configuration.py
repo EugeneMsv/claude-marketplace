@@ -91,6 +91,73 @@ class TestConfigurationLoaderMr:
         assert ConfigurationLoader.DEFAULT_CONFIG['mr']['titleUpdateEnabled'] is False
 
 
+class TestConfigurationMrDescriptionUpdate:
+    """Tests for mr_description_update_enabled property."""
+
+    def test_mr_description_update_enabled_default_is_false(self):
+        """Given no mr config, mr_description_update_enabled defaults to False."""
+        config = Configuration(
+            enabled=True,
+            base_branches=["main"],
+            tracked_extensions={".py"},
+            enable_logging=False,
+            log_file="test.log",
+        )
+        assert config.mr_description_update_enabled is False
+
+    def test_mr_description_update_enabled_when_set_true(self):
+        """Given mr_description_update_enabled=True, property returns True."""
+        config = Configuration(
+            enabled=True,
+            base_branches=["main"],
+            tracked_extensions={".py"},
+            enable_logging=False,
+            log_file="test.log",
+            mr_description_update_enabled=True,
+        )
+        assert config.mr_description_update_enabled is True
+
+
+class TestConfigurationLoaderMrDescriptionUpdate:
+    """Tests for ConfigurationLoader loading mr.descriptionUpdateEnabled."""
+
+    @pytest.mark.parametrize("value,expected", [
+        (True, True),
+        (False, False),
+    ])
+    def test_load_with_description_update_field(self, tmp_path, value, expected):
+        """Given config with mr.descriptionUpdateEnabled, loads correctly."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "enabled": True,
+            "base_branches": ["main"],
+            "tracked_extensions": [".py"],
+            "enable_logging": False,
+            "log_file": "test.log",
+            "mr": {"descriptionUpdateEnabled": value},
+        }))
+        config = ConfigurationLoader.load(config_file)
+        assert config.mr_description_update_enabled is expected
+
+    def test_load_without_description_update_defaults_to_false(self, tmp_path):
+        """Given config without descriptionUpdateEnabled field, defaults to False."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "enabled": True,
+            "base_branches": ["main"],
+            "tracked_extensions": [".py"],
+            "enable_logging": False,
+            "log_file": "test.log",
+            "mr": {"titleUpdateEnabled": True},
+        }))
+        config = ConfigurationLoader.load(config_file)
+        assert config.mr_description_update_enabled is False
+
+    def test_default_config_has_description_update_field(self):
+        """DEFAULT_CONFIG includes mr.descriptionUpdateEnabled=False."""
+        assert ConfigurationLoader.DEFAULT_CONFIG['mr']['descriptionUpdateEnabled'] is False
+
+
 class TestConfigurationMrAutoCreation:
     """Tests for mr_auto_creation_enabled property."""
 
@@ -241,6 +308,43 @@ class TestConfigurationLoaderMrLabeling:
     def test_default_config_has_labeling_field(self):
         """DEFAULT_CONFIG includes mr.labelingEnabled=False."""
         assert ConfigurationLoader.DEFAULT_CONFIG['mr']['labelingEnabled'] is False
+
+
+class TestConfigurationMrFeaturesEnabled:
+    """Tests for mr_features_enabled aggregate property."""
+
+    def _config(self, **mr_kwargs):
+        return Configuration(
+            enabled=True,
+            base_branches=["main"],
+            tracked_extensions={".py"},
+            enable_logging=False,
+            log_file="test.log",
+            **mr_kwargs,
+        )
+
+    def test_false_when_all_flags_off(self):
+        """Given all MR flags off, mr_features_enabled is False."""
+        assert self._config().mr_features_enabled is False
+
+    @pytest.mark.parametrize("flag", [
+        "mr_title_update_enabled",
+        "mr_description_update_enabled",
+        "mr_auto_creation_enabled",
+        "mr_labeling_enabled",
+    ])
+    def test_true_when_single_flag_on(self, flag):
+        """Given any single MR flag on, mr_features_enabled is True."""
+        assert self._config(**{flag: True}).mr_features_enabled is True
+
+    def test_true_when_all_flags_on(self):
+        """Given all MR flags on, mr_features_enabled is True."""
+        assert self._config(
+            mr_title_update_enabled=True,
+            mr_description_update_enabled=True,
+            mr_auto_creation_enabled=True,
+            mr_labeling_enabled=True,
+        ).mr_features_enabled is True
 
 
 class TestConfigResolveConfigPath:
