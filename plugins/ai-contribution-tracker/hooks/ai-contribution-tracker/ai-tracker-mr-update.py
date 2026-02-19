@@ -41,8 +41,13 @@ def main():
             logger.info("AI tracker disabled in config")
             hook_output.exit_with_success()
 
-        if not config.mr_title_update_enabled and not config.mr_auto_creation_enabled and not config.mr_labeling_enabled:
-            logger.info("MR title update, auto-creation, and labeling all disabled in config")
+        if (
+            not config.mr_title_update_enabled
+            and not config.mr_description_update_enabled
+            and not config.mr_auto_creation_enabled
+            and not config.mr_labeling_enabled
+        ):
+            logger.info("All MR features disabled in config")
             hook_output.exit_with_success()
 
         # Read hook input
