@@ -9,8 +9,7 @@ from infrastructure.git_repository import GitRepository
 from infrastructure.glab_repository import GlabRepository, MrInfo
 from infrastructure.configuration import Configuration
 from infrastructure.tracking_repository import TrackingRepository
-
-PUSH_PATTERN = re.compile(r'\bgit\s+push\b')
+from services.bash_command_detector import BashCommandDetector
 
 
 @dataclass
@@ -83,7 +82,7 @@ class MrService:
         Returns:
             MrResult with success status and AI percentage if successful
         """
-        if not command or not PUSH_PATTERN.search(command):
+        if not BashCommandDetector.is_git_push(command):
             self._logger.info("Not a git push command, exiting")
             return MrResult(False)
 

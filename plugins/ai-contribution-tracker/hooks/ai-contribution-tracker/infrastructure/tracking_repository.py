@@ -57,6 +57,7 @@ class TrackingRepository:
             tracking.stats = self._migrate_stats_format(stats)
 
         tracking.last_updated = data.get('last_updated')
+        tracking.pending_inject_head = data.get('pending_inject_head')
         tracking.files_tracked = data.get('files_tracked', [])
 
         # Migrate hash data from old format (list) to new format (dict with counts)
@@ -151,6 +152,7 @@ class TrackingRepository:
             'files_tracked': tracking.files_tracked,
             'stats': tracking.stats,
             'last_updated': tracking.last_updated,
+            'pending_inject_head': tracking.pending_inject_head,
             'ai_line_hashes': tracking.ai_line_hashes,
             'ai_removed_line_hashes': tracking.ai_removed_line_hashes
         }

@@ -68,7 +68,7 @@ def main():
         if result.message:
             hook_output.exit_with_success(result.message)
         elif result.success and result.ai_percentage is not None:
-            hook_output.exit_with_success(f"✓ MR title updated: {result.ai_percentage}% AI")
+            hook_output.exit_with_success(f"✓ MR updated: {result.ai_percentage}% AI")
 
     except Exception as e:
         try:

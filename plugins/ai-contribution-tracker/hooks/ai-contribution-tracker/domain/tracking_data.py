@@ -25,6 +25,7 @@ class TrackingData:
         self.files_tracked: List[str] = []
         self.stats: Optional[Dict] = None
         self.last_updated: Optional[str] = None
+        self.pending_inject_head: Optional[str] = None
 
     def add_ai_lines(self, file_path: str, lines: List[str], hasher: LineHasher) -> None:
         """Add AI-authored lines to tracking with occurrence counts.
