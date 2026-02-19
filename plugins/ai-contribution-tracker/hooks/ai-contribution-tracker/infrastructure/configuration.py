@@ -22,6 +22,7 @@ class Configuration:
         format_detection_enabled: bool = True,
         format_commands: List[str] = None,
         mr_title_update_enabled: bool = False,
+        mr_description_update_enabled: bool = False,
         mr_auto_creation_enabled: bool = False,
         mr_labeling_enabled: bool = False,
         housekeeping_enabled: bool = False,
@@ -39,6 +40,7 @@ class Configuration:
             format_detection_enabled: Whether format detection is enabled
             format_commands: List of formatter commands to detect
             mr_title_update_enabled: Whether MR title update on push is enabled
+            mr_description_update_enabled: Whether MR description update on push is enabled
             mr_auto_creation_enabled: Whether draft MR auto-creation on push is enabled
             mr_labeling_enabled: Whether MR label with AI percentage is enabled
             housekeeping_enabled: Whether housekeeping is enabled
@@ -53,6 +55,7 @@ class Configuration:
         self._format_detection_enabled = format_detection_enabled
         self._format_commands = format_commands.copy() if format_commands else []
         self._mr_title_update_enabled = mr_title_update_enabled
+        self._mr_description_update_enabled = mr_description_update_enabled
         self._mr_auto_creation_enabled = mr_auto_creation_enabled
         self._mr_labeling_enabled = mr_labeling_enabled
         self._housekeeping_enabled = housekeeping_enabled
@@ -97,6 +100,11 @@ class Configuration:
     def mr_title_update_enabled(self) -> bool:
         """Check if MR title update on push is enabled."""
         return self._mr_title_update_enabled
+
+    @property
+    def mr_description_update_enabled(self) -> bool:
+        """Check if MR description update on push is enabled."""
+        return self._mr_description_update_enabled
 
     @property
     def mr_auto_creation_enabled(self) -> bool:
@@ -187,6 +195,7 @@ class ConfigurationLoader:
         },
         'mr': {
             'titleUpdateEnabled': False,
+            'descriptionUpdateEnabled': False,
             'autoCreationEnabled': False,
             'labelingEnabled': False
         },
@@ -274,6 +283,7 @@ class ConfigurationLoader:
         default_mr = ConfigurationLoader.DEFAULT_CONFIG['mr']
         mr_config = config_dict.get('mr', default_mr)
         mr_title_update_enabled = mr_config.get('titleUpdateEnabled', default_mr['titleUpdateEnabled'])
+        mr_description_update_enabled = mr_config.get('descriptionUpdateEnabled', default_mr['descriptionUpdateEnabled'])
         mr_auto_creation_enabled = mr_config.get('autoCreationEnabled', default_mr['autoCreationEnabled'])
         mr_labeling_enabled = mr_config.get('labelingEnabled', default_mr['labelingEnabled'])
 
@@ -293,6 +303,7 @@ class ConfigurationLoader:
             format_detection_enabled=format_enabled,
             format_commands=format_commands,
             mr_title_update_enabled=mr_title_update_enabled,
+            mr_description_update_enabled=mr_description_update_enabled,
             mr_auto_creation_enabled=mr_auto_creation_enabled,
             mr_labeling_enabled=mr_labeling_enabled,
             housekeeping_enabled=housekeeping_enabled,

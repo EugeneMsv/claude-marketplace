@@ -91,6 +91,73 @@ class TestConfigurationLoaderMr:
         assert ConfigurationLoader.DEFAULT_CONFIG['mr']['titleUpdateEnabled'] is False
 
 
+class TestConfigurationMrDescriptionUpdate:
+    """Tests for mr_description_update_enabled property."""
+
+    def test_mr_description_update_enabled_default_is_false(self):
+        """Given no mr config, mr_description_update_enabled defaults to False."""
+        config = Configuration(
+            enabled=True,
+            base_branches=["main"],
+            tracked_extensions={".py"},
+            enable_logging=False,
+            log_file="test.log",
+        )
+        assert config.mr_description_update_enabled is False
+
+    def test_mr_description_update_enabled_when_set_true(self):
+        """Given mr_description_update_enabled=True, property returns True."""
+        config = Configuration(
+            enabled=True,
+            base_branches=["main"],
+            tracked_extensions={".py"},
+            enable_logging=False,
+            log_file="test.log",
+            mr_description_update_enabled=True,
+        )
+        assert config.mr_description_update_enabled is True
+
+
+class TestConfigurationLoaderMrDescriptionUpdate:
+    """Tests for ConfigurationLoader loading mr.descriptionUpdateEnabled."""
+
+    @pytest.mark.parametrize("value,expected", [
+        (True, True),
+        (False, False),
+    ])
+    def test_load_with_description_update_field(self, tmp_path, value, expected):
+        """Given config with mr.descriptionUpdateEnabled, loads correctly."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "enabled": True,
+            "base_branches": ["main"],
+            "tracked_extensions": [".py"],
+            "enable_logging": False,
+            "log_file": "test.log",
+            "mr": {"descriptionUpdateEnabled": value},
+        }))
+        config = ConfigurationLoader.load(config_file)
+        assert config.mr_description_update_enabled is expected
+
+    def test_load_without_description_update_defaults_to_false(self, tmp_path):
+        """Given config without descriptionUpdateEnabled field, defaults to False."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "enabled": True,
+            "base_branches": ["main"],
+            "tracked_extensions": [".py"],
+            "enable_logging": False,
+            "log_file": "test.log",
+            "mr": {"titleUpdateEnabled": True},
+        }))
+        config = ConfigurationLoader.load(config_file)
+        assert config.mr_description_update_enabled is False
+
+    def test_default_config_has_description_update_field(self):
+        """DEFAULT_CONFIG includes mr.descriptionUpdateEnabled=False."""
+        assert ConfigurationLoader.DEFAULT_CONFIG['mr']['descriptionUpdateEnabled'] is False
+
+
 class TestConfigurationMrAutoCreation:
     """Tests for mr_auto_creation_enabled property."""
 
