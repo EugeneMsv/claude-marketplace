@@ -117,6 +117,16 @@ class Configuration:
         return self._mr_labeling_enabled
 
     @property
+    def mr_features_enabled(self) -> bool:
+        """Check if any MR feature is enabled (title, description, auto-creation, or labeling)."""
+        return (
+            self._mr_title_update_enabled
+            or self._mr_description_update_enabled
+            or self._mr_auto_creation_enabled
+            or self._mr_labeling_enabled
+        )
+
+    @property
     def format_detection_enabled(self) -> bool:
         """Check if format detection is enabled."""
         return self._format_detection_enabled

@@ -310,6 +310,43 @@ class TestConfigurationLoaderMrLabeling:
         assert ConfigurationLoader.DEFAULT_CONFIG['mr']['labelingEnabled'] is False
 
 
+class TestConfigurationMrFeaturesEnabled:
+    """Tests for mr_features_enabled aggregate property."""
+
+    def _config(self, **mr_kwargs):
+        return Configuration(
+            enabled=True,
+            base_branches=["main"],
+            tracked_extensions={".py"},
+            enable_logging=False,
+            log_file="test.log",
+            **mr_kwargs,
+        )
+
+    def test_false_when_all_flags_off(self):
+        """Given all MR flags off, mr_features_enabled is False."""
+        assert self._config().mr_features_enabled is False
+
+    @pytest.mark.parametrize("flag", [
+        "mr_title_update_enabled",
+        "mr_description_update_enabled",
+        "mr_auto_creation_enabled",
+        "mr_labeling_enabled",
+    ])
+    def test_true_when_single_flag_on(self, flag):
+        """Given any single MR flag on, mr_features_enabled is True."""
+        assert self._config(**{flag: True}).mr_features_enabled is True
+
+    def test_true_when_all_flags_on(self):
+        """Given all MR flags on, mr_features_enabled is True."""
+        assert self._config(
+            mr_title_update_enabled=True,
+            mr_description_update_enabled=True,
+            mr_auto_creation_enabled=True,
+            mr_labeling_enabled=True,
+        ).mr_features_enabled is True
+
+
 class TestConfigResolveConfigPath:
     """Tests for ConfigurationLoader.resolve_config_path()."""
 
