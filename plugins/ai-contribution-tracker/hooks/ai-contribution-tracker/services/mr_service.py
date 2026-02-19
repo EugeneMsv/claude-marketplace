@@ -131,31 +131,23 @@ class MrService:
         stats = ContributionStats.from_dict(tracking.stats)
         self._logger.info(f"Stats from tracking: {stats.format_compact()}")
 
-        # Build and apply new title
-        new_title = self._build_new_title(mr['title'], stats)
-        title_updated = False
+        # Build update request based on active flags — each flag is independent
+        update_request = MrUpdateRequest()
 
-        if new_title != mr['title']:
-            title_success = self._glab_repo.update_mr_title(mr['iid'], new_title)
-            if title_success:
-                self._logger.info(f"=== MR title updated: {new_title} ===")
-                title_updated = True
-        else:
-            self._logger.info("Title unchanged, skipping title update")
+        if self._config.mr_title_update_enabled:
+            new_title = self._build_new_title(mr['title'], stats)
+            if new_title != mr['title']:
+                update_request.title = new_title
+            else:
+                self._logger.info("Title unchanged, skipping title update")
 
-        # Build and apply new description
-        new_description = self._merge_description(mr.get('description', ''), stats)
-        description_updated = False
+        if self._config.mr_description_update_enabled:
+            new_description = self._merge_description(mr.get('description', ''), stats)
+            if new_description != mr.get('description', ''):
+                update_request.description = new_description
+            else:
+                self._logger.info("Description unchanged, skipping description update")
 
-        if new_description != mr.get('description', ''):
-            desc_success = self._glab_repo.update_mr_description(mr['iid'], new_description)
-            if desc_success:
-                self._logger.info("=== MR description updated ===")
-                description_updated = True
-        else:
-            self._logger.info("Description unchanged, skipping description update")
-
-        # Apply AI label if labeling is enabled
         if self._config.mr_labeling_enabled:
             new_label = self._ai_label(stats)
             existing_ai_label = next(
@@ -163,14 +155,20 @@ class MrService:
                 None
             )
             if existing_ai_label is None:
-                self._glab_repo.add_label(mr['iid'], new_label)
+                update_request.label_to_add = new_label
             elif existing_ai_label != new_label:
-                self._glab_repo.remove_label(mr['iid'], existing_ai_label)
-                self._glab_repo.add_label(mr['iid'], new_label)
+                update_request.label_to_remove = existing_ai_label
+                update_request.label_to_add = new_label
             else:
                 self._logger.info(f"AI label unchanged: {new_label}")
 
-        success = title_updated or description_updated
+        if update_request.is_empty():
+            self._logger.info("No MR changes requested by active flags")
+            return MrResult(False)
+
+        success = self._glab_repo.update_mr(mr['iid'], update_request)
+        if success:
+            self._logger.info("=== MR updated ===")
         ai_percentage = int(round(stats.ai_percentage)) if success else None
         return MrResult(success, ai_percentage)
 
@@ -197,7 +195,7 @@ class MrService:
         title = self._derive_title_from_branch(branch)
         self._logger.info(f"Derived title: {title}")
 
-        # Try to add AI stats if available
+        # Enrich MR with AI stats based on active flags
         description = ''
         ai_percentage = None
         create_label = None
@@ -209,16 +207,17 @@ class MrService:
 
             if tracking and tracking.stats:
                 stats = ContributionStats.from_dict(tracking.stats)
-                stats_tag = stats.format_compact()
-                title = f"{title} {stats_tag}"
-                self._logger.info(f"Added AI stats to title: {stats_tag}")
                 ai_percentage = int(round(stats.ai_percentage))
 
-                # Build description with stats
-                description = stats.format_description()
-                self._logger.info("Added AI stats to description")
+                if self._config.mr_title_update_enabled:
+                    stats_tag = stats.format_compact()
+                    title = f"{title} {stats_tag}"
+                    self._logger.info(f"Added AI stats to title: {stats_tag}")
 
-                # Compute label for creation if labeling enabled
+                if self._config.mr_description_update_enabled:
+                    description = stats.format_description()
+                    self._logger.info("Added AI stats to description")
+
                 if self._config.mr_labeling_enabled:
                     create_label = self._ai_label(stats)
 

@@ -188,13 +188,19 @@ class TestAiLabel:
         assert MrService._ai_label(stats) == expected_label
 
 
-def _make_service(labeling_enabled=False, title_update=True, auto_creation=True):
+def _make_service(
+    labeling_enabled=False,
+    title_update=True,
+    description_update=True,
+    auto_creation=True,
+):
     """Build an MrService with mocked dependencies."""
     git_repo = MagicMock()
     glab_repo = MagicMock()
     config = MagicMock()
     config.mr_labeling_enabled = labeling_enabled
     config.mr_title_update_enabled = title_update
+    config.mr_description_update_enabled = description_update
     config.mr_auto_creation_enabled = auto_creation
     config.base_branches = ["main"]
     logger = logging.getLogger("test")
@@ -221,122 +227,302 @@ def _make_tracking_mock(ai_pct: float):
     return tracking
 
 
-class TestProcessPushLabeling:
-    """Tests for label apply logic in process_push."""
+class TestProcessPushFlagIndependence:
+    """Tests verifying T/D/L flags are fully independent in process_push."""
 
-    def _setup_process_push(self, service, git_repo, glab_repo, existing_labels, ai_pct):
-        """Wire up mocks for a successful process_push scenario."""
+    def _setup(self, service, git_repo, glab_repo, existing_labels=None, ai_pct=85.0, title="My MR"):
+        """Wire up mocks for a successful process_push run."""
         git_repo.get_current_branch.return_value = "feature/test"
         glab_repo.get_mr_for_branch.return_value = {
             'iid': '42',
-            'title': 'My MR',
+            'title': title,
             'description': '',
-            'labels': existing_labels,
+            'labels': existing_labels or [],
         }
         git_repo.get_root.return_value = Path("/fake/root")
-        glab_repo.update_mr_title.return_value = True
-        glab_repo.update_mr_description.return_value = True
-        glab_repo.add_label.return_value = True
-        glab_repo.remove_label.return_value = True
+        glab_repo.update_mr.return_value = True
         return _make_tracking_mock(ai_pct)
 
+    def _get_update_request(self, glab_repo):
+        """Extract the MrUpdateRequest passed to update_mr."""
+        assert glab_repo.update_mr.called, "update_mr was not called"
+        return glab_repo.update_mr.call_args[0][1]
+
+    # --- Title flag ---
+
     @patch("services.mr_service.TrackingRepository")
-    def test_adds_label_when_no_prior_ai_label(self, mock_tracking_cls):
-        """Given no prior AI label and labeling enabled, add_label is called."""
-        service, git_repo, glab_repo, _ = _make_service(labeling_enabled=True)
-        tracking = self._setup_process_push(service, git_repo, glab_repo, [], 85.0)
+    def test_title_set_when_title_update_enabled(self, mock_tracking_cls):
+        """Given title_update=True, request.title is populated."""
+        service, git_repo, glab_repo, _ = _make_service(title_update=True, description_update=False, labeling_enabled=False)
+        tracking = self._setup(service, git_repo, glab_repo)
         mock_tracking_cls.return_value.load.return_value = tracking
 
         service.process_push("git push")
 
-        glab_repo.add_label.assert_called_once_with("42", "AI:85%")
-        glab_repo.remove_label.assert_not_called()
+        req = self._get_update_request(glab_repo)
+        assert req.title is not None
+        assert req.description is None
+        assert req.label_to_add is None
 
     @patch("services.mr_service.TrackingRepository")
-    def test_updates_label_when_percentage_changed(self, mock_tracking_cls):
-        """Given stale AI label and new percentage, removes old and adds new."""
-        service, git_repo, glab_repo, _ = _make_service(labeling_enabled=True)
-        tracking = self._setup_process_push(service, git_repo, glab_repo, ["AI:70%"], 85.0)
+    def test_title_not_set_when_title_update_disabled(self, mock_tracking_cls):
+        """Given title_update=False, request.title is None."""
+        service, git_repo, glab_repo, _ = _make_service(title_update=False, description_update=True, labeling_enabled=False)
+        tracking = self._setup(service, git_repo, glab_repo)
         mock_tracking_cls.return_value.load.return_value = tracking
 
         service.process_push("git push")
 
-        glab_repo.remove_label.assert_called_once_with("42", "AI:70%")
-        glab_repo.add_label.assert_called_once_with("42", "AI:85%")
+        req = self._get_update_request(glab_repo)
+        assert req.title is None
+        assert req.description is not None
+
+    # --- Description flag ---
 
     @patch("services.mr_service.TrackingRepository")
-    def test_skips_label_when_unchanged(self, mock_tracking_cls):
-        """Given same AI label already on MR, no add/remove calls made."""
-        service, git_repo, glab_repo, _ = _make_service(labeling_enabled=True)
-        tracking = self._setup_process_push(service, git_repo, glab_repo, ["AI:85%"], 85.0)
+    def test_description_set_when_description_update_enabled(self, mock_tracking_cls):
+        """Given description_update=True, request.description is populated."""
+        service, git_repo, glab_repo, _ = _make_service(title_update=False, description_update=True, labeling_enabled=False)
+        tracking = self._setup(service, git_repo, glab_repo)
         mock_tracking_cls.return_value.load.return_value = tracking
 
         service.process_push("git push")
 
-        glab_repo.add_label.assert_not_called()
-        glab_repo.remove_label.assert_not_called()
+        req = self._get_update_request(glab_repo)
+        assert req.description is not None
+        assert req.title is None
 
     @patch("services.mr_service.TrackingRepository")
-    def test_no_label_calls_when_labeling_disabled(self, mock_tracking_cls):
-        """Given labeling disabled, no label calls made even if MR found."""
-        service, git_repo, glab_repo, _ = _make_service(labeling_enabled=False)
-        tracking = self._setup_process_push(service, git_repo, glab_repo, [], 85.0)
+    def test_description_not_set_when_description_update_disabled(self, mock_tracking_cls):
+        """Given description_update=False, request.description is None."""
+        service, git_repo, glab_repo, _ = _make_service(title_update=True, description_update=False, labeling_enabled=False)
+        tracking = self._setup(service, git_repo, glab_repo)
         mock_tracking_cls.return_value.load.return_value = tracking
 
         service.process_push("git push")
 
-        glab_repo.add_label.assert_not_called()
-        glab_repo.remove_label.assert_not_called()
+        req = self._get_update_request(glab_repo)
+        assert req.description is None
+
+    # --- Labeling flag ---
 
     @patch("services.mr_service.TrackingRepository")
-    def test_preserves_non_ai_labels_when_updating(self, mock_tracking_cls):
-        """Given MR with non-AI labels and stale AI label, only AI label is replaced."""
-        service, git_repo, glab_repo, _ = _make_service(labeling_enabled=True)
-        tracking = self._setup_process_push(service, git_repo, glab_repo, ["bug", "AI:70%"], 90.0)
+    def test_label_to_add_set_when_no_prior_ai_label_and_labeling_enabled(self, mock_tracking_cls):
+        """Given labeling=True and no existing AI label, request.label_to_add is set."""
+        service, git_repo, glab_repo, _ = _make_service(title_update=False, description_update=False, labeling_enabled=True)
+        tracking = self._setup(service, git_repo, glab_repo, existing_labels=[], ai_pct=85.0)
         mock_tracking_cls.return_value.load.return_value = tracking
 
         service.process_push("git push")
 
-        glab_repo.remove_label.assert_called_once_with("42", "AI:70%")
-        glab_repo.add_label.assert_called_once_with("42", "AI:90%")
+        req = self._get_update_request(glab_repo)
+        assert req.label_to_add == "AI:85%"
+        assert req.label_to_remove is None
+
+    @patch("services.mr_service.TrackingRepository")
+    def test_label_replace_when_percentage_changed(self, mock_tracking_cls):
+        """Given labeling=True and stale AI label, request has remove+add."""
+        service, git_repo, glab_repo, _ = _make_service(title_update=False, description_update=False, labeling_enabled=True)
+        tracking = self._setup(service, git_repo, glab_repo, existing_labels=["AI:70%"], ai_pct=85.0)
+        mock_tracking_cls.return_value.load.return_value = tracking
+
+        service.process_push("git push")
+
+        req = self._get_update_request(glab_repo)
+        assert req.label_to_remove == "AI:70%"
+        assert req.label_to_add == "AI:85%"
+
+    @patch("services.mr_service.TrackingRepository")
+    def test_label_unchanged_skipped(self, mock_tracking_cls):
+        """Given labeling=True and label already correct, no label fields in request."""
+        service, git_repo, glab_repo, _ = _make_service(title_update=False, description_update=False, labeling_enabled=True)
+        tracking = self._setup(service, git_repo, glab_repo, existing_labels=["AI:85%"], ai_pct=85.0)
+        mock_tracking_cls.return_value.load.return_value = tracking
+
+        # Empty request → update_mr not called
+        service.process_push("git push")
+
+        glab_repo.update_mr.assert_not_called()
+
+    @patch("services.mr_service.TrackingRepository")
+    def test_label_not_set_when_labeling_disabled(self, mock_tracking_cls):
+        """Given labeling=False, no label fields in request."""
+        service, git_repo, glab_repo, _ = _make_service(title_update=True, description_update=False, labeling_enabled=False)
+        tracking = self._setup(service, git_repo, glab_repo)
+        mock_tracking_cls.return_value.load.return_value = tracking
+
+        service.process_push("git push")
+
+        req = self._get_update_request(glab_repo)
+        assert req.label_to_add is None
+        assert req.label_to_remove is None
+
+    # --- All flags on ---
+
+    @patch("services.mr_service.TrackingRepository")
+    def test_all_flags_enabled_populates_all_fields(self, mock_tracking_cls):
+        """Given T+D+L all enabled, request has title, description, and label."""
+        service, git_repo, glab_repo, _ = _make_service(title_update=True, description_update=True, labeling_enabled=True)
+        tracking = self._setup(service, git_repo, glab_repo, existing_labels=[], ai_pct=85.0)
+        mock_tracking_cls.return_value.load.return_value = tracking
+
+        service.process_push("git push")
+
+        req = self._get_update_request(glab_repo)
+        assert req.title is not None
+        assert req.description is not None
+        assert req.label_to_add == "AI:85%"
+
+    # --- No flags → no call ---
+
+    @patch("services.mr_service.TrackingRepository")
+    def test_no_flags_enabled_no_update_call(self, mock_tracking_cls):
+        """Given all flags off, update_mr is never called."""
+        service, git_repo, glab_repo, _ = _make_service(title_update=False, description_update=False, labeling_enabled=False)
+        tracking = self._setup(service, git_repo, glab_repo)
+        mock_tracking_cls.return_value.load.return_value = tracking
+
+        service.process_push("git push")
+
+        glab_repo.update_mr.assert_not_called()
+
+    # --- Single call guarantee ---
+
+    @patch("services.mr_service.TrackingRepository")
+    def test_update_mr_called_exactly_once(self, mock_tracking_cls):
+        """Given any active flags, update_mr is called at most once per push."""
+        service, git_repo, glab_repo, _ = _make_service(title_update=True, description_update=True, labeling_enabled=True)
+        tracking = self._setup(service, git_repo, glab_repo, existing_labels=["AI:70%"], ai_pct=85.0)
+        mock_tracking_cls.return_value.load.return_value = tracking
+
+        service.process_push("git push")
+
+        assert glab_repo.update_mr.call_count == 1
 
 
-class TestAutoCreateMrLabeling:
-    """Tests for label apply logic in _auto_create_mr."""
+class TestAutoCreateMrFlagIndependence:
+    """Tests verifying T/D/L flags are independent in _auto_create_mr."""
 
-    def _setup_auto_create(self, service, git_repo, glab_repo, ai_pct):
+    def _setup(self, service, git_repo, glab_repo, ai_pct=85.0):
         """Wire up mocks for _auto_create_mr."""
         git_repo.resolve_target_branch.return_value = "main"
         git_repo.get_root.return_value = Path("/fake/root")
         glab_repo.create_draft_mr.return_value = True
         return _make_tracking_mock(ai_pct)
 
-    @patch("services.mr_service.GitRepository")
-    @patch("services.mr_service.TrackingRepository")
-    def test_passes_label_to_create_when_labeling_enabled(self, mock_tracking_cls, mock_git_cls):
-        """Given labeling enabled and stats available, create_draft_mr called with label."""
-        service, git_repo, glab_repo, _ = _make_service(labeling_enabled=True, auto_creation=True)
-        tracking = self._setup_auto_create(service, git_repo, glab_repo, 85.0)
-        mock_tracking_cls.return_value.load.return_value = tracking
-
-        service._auto_create_mr("feature/test")
-
-        call_kwargs = glab_repo.create_draft_mr.call_args
-        assert call_kwargs.kwargs.get('label') == "AI:85%" or (
-            len(call_kwargs.args) >= 5 and call_kwargs.args[4] == "AI:85%"
-        )
+    def _create_call(self, glab_repo):
+        """Return (title, description, label) from create_draft_mr call args."""
+        args = glab_repo.create_draft_mr.call_args
+        title = args[0][1] if len(args[0]) >= 2 else args.kwargs.get('title')
+        description = args[0][3] if len(args[0]) >= 4 else args.kwargs.get('description', '')
+        label = args.kwargs.get('label') or (args[0][4] if len(args[0]) >= 5 else None)
+        return title, description, label
 
     @patch("services.mr_service.GitRepository")
     @patch("services.mr_service.TrackingRepository")
-    def test_no_label_when_labeling_disabled(self, mock_tracking_cls, mock_git_cls):
-        """Given labeling disabled, create_draft_mr called without label."""
-        service, git_repo, glab_repo, _ = _make_service(labeling_enabled=False, auto_creation=True)
-        tracking = self._setup_auto_create(service, git_repo, glab_repo, 85.0)
+    def test_title_has_ai_tag_when_title_update_enabled(self, mock_tracking_cls, mock_git_cls):
+        """Given T=True, MR title includes the AI stats tag."""
+        service, git_repo, glab_repo, _ = _make_service(
+            title_update=True, description_update=False, labeling_enabled=False, auto_creation=True
+        )
+        tracking = self._setup(service, git_repo, glab_repo, 85.0)
         mock_tracking_cls.return_value.load.return_value = tracking
 
-        service._auto_create_mr("feature/test")
+        service._auto_create_mr("feature/PROJ-1-test")
 
-        call_kwargs = glab_repo.create_draft_mr.call_args
-        assert call_kwargs.kwargs.get('label') is None or (
-            len(call_kwargs.args) < 5
+        title, description, label = self._create_call(glab_repo)
+        assert "[AI:" in title
+        assert description == ''
+        assert label is None
+
+    @patch("services.mr_service.GitRepository")
+    @patch("services.mr_service.TrackingRepository")
+    def test_title_has_no_ai_tag_when_title_update_disabled(self, mock_tracking_cls, mock_git_cls):
+        """Given T=False, MR title has no AI stats tag."""
+        service, git_repo, glab_repo, _ = _make_service(
+            title_update=False, description_update=False, labeling_enabled=False, auto_creation=True
         )
+        tracking = self._setup(service, git_repo, glab_repo, 85.0)
+        mock_tracking_cls.return_value.load.return_value = tracking
+
+        service._auto_create_mr("feature/PROJ-1-test")
+
+        title, _, _ = self._create_call(glab_repo)
+        assert "[AI:" not in title
+
+    @patch("services.mr_service.GitRepository")
+    @patch("services.mr_service.TrackingRepository")
+    def test_description_has_stats_when_description_update_enabled(self, mock_tracking_cls, mock_git_cls):
+        """Given D=True, MR description contains AI stats section."""
+        service, git_repo, glab_repo, _ = _make_service(
+            title_update=False, description_update=True, labeling_enabled=False, auto_creation=True
+        )
+        tracking = self._setup(service, git_repo, glab_repo, 85.0)
+        mock_tracking_cls.return_value.load.return_value = tracking
+
+        service._auto_create_mr("feature/PROJ-1-test")
+
+        _, description, _ = self._create_call(glab_repo)
+        assert "AI Contribution Stats" in description
+
+    @patch("services.mr_service.GitRepository")
+    @patch("services.mr_service.TrackingRepository")
+    def test_description_empty_when_description_update_disabled(self, mock_tracking_cls, mock_git_cls):
+        """Given D=False, MR description is empty."""
+        service, git_repo, glab_repo, _ = _make_service(
+            title_update=False, description_update=False, labeling_enabled=False, auto_creation=True
+        )
+        tracking = self._setup(service, git_repo, glab_repo, 85.0)
+        mock_tracking_cls.return_value.load.return_value = tracking
+
+        service._auto_create_mr("feature/PROJ-1-test")
+
+        _, description, _ = self._create_call(glab_repo)
+        assert description == ''
+
+    @patch("services.mr_service.GitRepository")
+    @patch("services.mr_service.TrackingRepository")
+    def test_label_set_when_labeling_enabled(self, mock_tracking_cls, mock_git_cls):
+        """Given L=True, create_draft_mr called with AI label."""
+        service, git_repo, glab_repo, _ = _make_service(
+            title_update=False, description_update=False, labeling_enabled=True, auto_creation=True
+        )
+        tracking = self._setup(service, git_repo, glab_repo, 85.0)
+        mock_tracking_cls.return_value.load.return_value = tracking
+
+        service._auto_create_mr("feature/PROJ-1-test")
+
+        _, _, label = self._create_call(glab_repo)
+        assert label == "AI:85%"
+
+    @patch("services.mr_service.GitRepository")
+    @patch("services.mr_service.TrackingRepository")
+    def test_label_none_when_labeling_disabled(self, mock_tracking_cls, mock_git_cls):
+        """Given L=False, create_draft_mr called without label."""
+        service, git_repo, glab_repo, _ = _make_service(
+            title_update=False, description_update=False, labeling_enabled=False, auto_creation=True
+        )
+        tracking = self._setup(service, git_repo, glab_repo, 85.0)
+        mock_tracking_cls.return_value.load.return_value = tracking
+
+        service._auto_create_mr("feature/PROJ-1-test")
+
+        _, _, label = self._create_call(glab_repo)
+        assert label is None
+
+    @patch("services.mr_service.GitRepository")
+    @patch("services.mr_service.TrackingRepository")
+    def test_all_flags_enabled_populates_all_content(self, mock_tracking_cls, mock_git_cls):
+        """Given T+D+L all enabled, MR gets title tag, description stats, and label."""
+        service, git_repo, glab_repo, _ = _make_service(
+            title_update=True, description_update=True, labeling_enabled=True, auto_creation=True
+        )
+        tracking = self._setup(service, git_repo, glab_repo, 85.0)
+        mock_tracking_cls.return_value.load.return_value = tracking
+
+        service._auto_create_mr("feature/PROJ-1-test")
+
+        title, description, label = self._create_call(glab_repo)
+        assert "[AI:" in title
+        assert "AI Contribution Stats" in description
+        assert label == "AI:85%"
