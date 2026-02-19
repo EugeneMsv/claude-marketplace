@@ -131,36 +131,11 @@ class MrService:
         stats = ContributionStats.from_dict(tracking.stats)
         self._logger.info(f"Stats from tracking: {stats.format_compact()}")
 
-        # Build update request based on active flags — each flag is independent
+        # Build update request — each helper owns its flag check
         update_request = MrUpdateRequest()
-
-        if self._config.mr_title_update_enabled:
-            new_title = self._build_new_title(mr['title'], stats)
-            if new_title != mr['title']:
-                update_request.title = new_title
-            else:
-                self._logger.info("Title unchanged, skipping title update")
-
-        if self._config.mr_description_update_enabled:
-            new_description = self._merge_description(mr.get('description', ''), stats)
-            if new_description != mr.get('description', ''):
-                update_request.description = new_description
-            else:
-                self._logger.info("Description unchanged, skipping description update")
-
-        if self._config.mr_labeling_enabled:
-            new_label = self._ai_label(stats)
-            existing_ai_label = next(
-                (lbl for lbl in mr.get('labels', []) if AI_LABEL_PATTERN.match(lbl)),
-                None
-            )
-            if existing_ai_label is None:
-                update_request.label_to_add = new_label
-            elif existing_ai_label != new_label:
-                update_request.label_to_remove = existing_ai_label
-                update_request.label_to_add = new_label
-            else:
-                self._logger.info(f"AI label unchanged: {new_label}")
+        self._apply_title_update(mr, stats, update_request)
+        self._apply_description_update(mr, stats, update_request)
+        self._apply_label_update(mr, stats, update_request)
 
         if update_request.is_empty():
             self._logger.info("No MR changes requested by active flags")
@@ -229,6 +204,43 @@ class MrService:
             if ai_percentage is None:
                 return MrResult(success, None, message=f"✓ Draft MR created: {title}")
         return MrResult(success, ai_percentage)
+
+    def _apply_title_update(self, mr: dict, stats: ContributionStats, request: MrUpdateRequest) -> None:
+        """Populate request.title if title update is enabled and title would change."""
+        if not self._config.mr_title_update_enabled:
+            return
+        new_title = self._build_new_title(mr['title'], stats)
+        if new_title != mr['title']:
+            request.title = new_title
+        else:
+            self._logger.info("Title unchanged, skipping title update")
+
+    def _apply_description_update(self, mr: dict, stats: ContributionStats, request: MrUpdateRequest) -> None:
+        """Populate request.description if description update is enabled and description would change."""
+        if not self._config.mr_description_update_enabled:
+            return
+        new_description = self._merge_description(mr.get('description', ''), stats)
+        if new_description != mr.get('description', ''):
+            request.description = new_description
+        else:
+            self._logger.info("Description unchanged, skipping description update")
+
+    def _apply_label_update(self, mr: dict, stats: ContributionStats, request: MrUpdateRequest) -> None:
+        """Populate request label fields if labeling is enabled and label would change."""
+        if not self._config.mr_labeling_enabled:
+            return
+        new_label = self._ai_label(stats)
+        existing_ai_label = next(
+            (lbl for lbl in mr.get('labels', []) if AI_LABEL_PATTERN.match(lbl)),
+            None
+        )
+        if existing_ai_label is None:
+            request.label_to_add = new_label
+        elif existing_ai_label != new_label:
+            request.label_to_remove = existing_ai_label
+            request.label_to_add = new_label
+        else:
+            self._logger.info(f"AI label unchanged: {new_label}")
 
     @staticmethod
     def _derive_title_from_branch(branch: str) -> str:
