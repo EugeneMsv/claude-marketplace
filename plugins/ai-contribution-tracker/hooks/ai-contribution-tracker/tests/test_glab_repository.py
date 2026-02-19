@@ -11,6 +11,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from infrastructure.glab_repository import GlabRepository
+from services.mr_service import MrUpdateRequest
 
 
 @pytest.fixture
@@ -120,6 +121,102 @@ class TestGetMrForBranch:
         """Given malformed JSON output, returns None."""
         mock_run.return_value = MagicMock(stdout="not json", returncode=0)
         assert glab.get_mr_for_branch("feature/bad") is None
+
+
+class TestUpdateMr:
+    """Tests for GlabRepository.update_mr() single-call method."""
+
+    @patch("infrastructure.glab_repository.subprocess.run")
+    def test_returns_true_on_success(self, mock_run, glab):
+        """Given successful update, returns True."""
+        mock_run.return_value = MagicMock(returncode=0)
+        req = MrUpdateRequest(title="New Title")
+        assert glab.update_mr("42", req) is True
+
+    @patch("infrastructure.glab_repository.subprocess.run",
+           side_effect=subprocess.CalledProcessError(1, "glab"))
+    def test_returns_false_on_failure(self, mock_run, glab):
+        """Given glab fails, returns False."""
+        req = MrUpdateRequest(title="Title")
+        assert glab.update_mr("42", req) is False
+
+    @patch("infrastructure.glab_repository.subprocess.run",
+           side_effect=subprocess.TimeoutExpired("glab", 10))
+    def test_returns_false_on_timeout(self, mock_run, glab):
+        """Given timeout, returns False."""
+        req = MrUpdateRequest(title="Title")
+        assert glab.update_mr("42", req) is False
+
+    @patch("infrastructure.glab_repository.subprocess.run")
+    def test_builds_title_only_command(self, mock_run, glab):
+        """Given only title set, command contains --title but not --description/--label/--unlabel."""
+        mock_run.return_value = MagicMock(returncode=0)
+        glab.update_mr("42", MrUpdateRequest(title="My Title"))
+        cmd = mock_run.call_args[0][0]
+        assert cmd == ['glab', 'mr', 'update', '42', '--title', 'My Title', '--yes']
+
+    @patch("infrastructure.glab_repository.subprocess.run")
+    def test_builds_description_only_command(self, mock_run, glab):
+        """Given only description set, command contains --description."""
+        mock_run.return_value = MagicMock(returncode=0)
+        glab.update_mr("42", MrUpdateRequest(description="Stats here"))
+        cmd = mock_run.call_args[0][0]
+        assert cmd == ['glab', 'mr', 'update', '42', '--description', 'Stats here', '--yes']
+
+    @patch("infrastructure.glab_repository.subprocess.run")
+    def test_builds_label_add_only_command(self, mock_run, glab):
+        """Given only label_to_add set, command contains --label."""
+        mock_run.return_value = MagicMock(returncode=0)
+        glab.update_mr("42", MrUpdateRequest(label_to_add="AI:85%"))
+        cmd = mock_run.call_args[0][0]
+        assert cmd == ['glab', 'mr', 'update', '42', '--label', 'AI:85%', '--yes']
+
+    @patch("infrastructure.glab_repository.subprocess.run")
+    def test_builds_label_remove_only_command(self, mock_run, glab):
+        """Given only label_to_remove set, command contains --unlabel."""
+        mock_run.return_value = MagicMock(returncode=0)
+        glab.update_mr("42", MrUpdateRequest(label_to_remove="AI:70%"))
+        cmd = mock_run.call_args[0][0]
+        assert cmd == ['glab', 'mr', 'update', '42', '--unlabel', 'AI:70%', '--yes']
+
+    @patch("infrastructure.glab_repository.subprocess.run")
+    def test_builds_full_command_with_all_fields(self, mock_run, glab):
+        """Given all fields set, command contains all flags in order."""
+        mock_run.return_value = MagicMock(returncode=0)
+        req = MrUpdateRequest(
+            title="New Title",
+            description="New Desc",
+            label_to_remove="AI:70%",
+            label_to_add="AI:85%",
+        )
+        glab.update_mr("42", req)
+        cmd = mock_run.call_args[0][0]
+        assert cmd == [
+            'glab', 'mr', 'update', '42',
+            '--title', 'New Title',
+            '--description', 'New Desc',
+            '--unlabel', 'AI:70%',
+            '--label', 'AI:85%',
+            '--yes',
+        ]
+
+    @pytest.mark.parametrize("req", [
+        MrUpdateRequest(title="T", description="D"),
+        MrUpdateRequest(title="T", label_to_add="AI:85%"),
+        MrUpdateRequest(description="D", label_to_remove="AI:70%", label_to_add="AI:85%"),
+    ])
+    @patch("infrastructure.glab_repository.subprocess.run")
+    def test_builds_partial_commands_correctly(self, mock_run, req, glab):
+        """Given partial request, only present fields appear in command."""
+        mock_run.return_value = MagicMock(returncode=0)
+        glab.update_mr("1", req)
+        cmd = mock_run.call_args[0][0]
+        assert cmd[0:4] == ['glab', 'mr', 'update', '1']
+        assert cmd[-1] == '--yes'
+        assert ('--title' in cmd) == (req.title is not None)
+        assert ('--description' in cmd) == (req.description is not None)
+        assert ('--label' in cmd) == (req.label_to_add is not None)
+        assert ('--unlabel' in cmd) == (req.label_to_remove is not None)
 
 
 class TestUpdateMrTitle:

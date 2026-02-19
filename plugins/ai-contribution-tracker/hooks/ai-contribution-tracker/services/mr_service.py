@@ -1,6 +1,7 @@
 """MR service for AI contribution tracking."""
 
 import re
+from dataclasses import dataclass
 from logging import Logger
 from typing import Optional
 from domain.contribution_stats import ContributionStats
@@ -10,6 +11,20 @@ from infrastructure.configuration import Configuration
 from infrastructure.tracking_repository import TrackingRepository
 
 PUSH_PATTERN = re.compile(r'\bgit\s+push\b')
+
+
+@dataclass
+class MrUpdateRequest:
+    """Value object describing all changes to apply in a single glab mr update call."""
+
+    title: Optional[str] = None
+    description: Optional[str] = None
+    label_to_add: Optional[str] = None
+    label_to_remove: Optional[str] = None
+
+    def is_empty(self) -> bool:
+        """Return True when no fields are set (nothing to update)."""
+        return all(v is None for v in [self.title, self.description, self.label_to_add, self.label_to_remove])
 STATS_TAG_PATTERN = re.compile(r'\s*\[AI:\s*\d+%\]')
 STATS_SECTION_PATTERN = re.compile(r'## AI Contribution Stats\s*```[^`]*```', re.MULTILINE | re.DOTALL)
 TICKET_PATTERN = re.compile(r'([A-Z]+-\d+)', re.IGNORECASE)

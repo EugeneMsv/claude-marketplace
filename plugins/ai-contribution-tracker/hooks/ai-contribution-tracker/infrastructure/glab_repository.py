@@ -1,9 +1,14 @@
 """GitLab CLI (glab) repository infrastructure."""
 
+from __future__ import annotations
+
 import json
 import subprocess
 from logging import Logger
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from services.mr_service import MrUpdateRequest
 
 
 class GlabRepository:
@@ -169,6 +174,43 @@ class GlabRepository:
             return True
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
             self._logger.warning(f"Failed to update MR description: {e}")
+            return False
+
+    def update_mr(self, mr_iid: str, request: MrUpdateRequest) -> bool:
+        """Apply all requested changes to an MR in a single glab call.
+
+        Builds one `glab mr update` command from the request fields.
+        Labels are processed as: remove old first, then add new.
+
+        Args:
+            mr_iid: MR internal ID (number)
+            request: Value object describing title, description, and label changes
+
+        Returns:
+            True if the update succeeded (or nothing to update)
+        """
+        cmd = ['glab', 'mr', 'update', mr_iid]
+        if request.title is not None:
+            cmd.extend(['--title', request.title])
+        if request.description is not None:
+            cmd.extend(['--description', request.description])
+        if request.label_to_remove is not None:
+            cmd.extend(['--unlabel', request.label_to_remove])
+        if request.label_to_add is not None:
+            cmd.extend(['--label', request.label_to_add])
+        cmd.append('--yes')
+
+        try:
+            subprocess.run(
+                cmd,
+                capture_output=True,
+                check=True,
+                timeout=self.TIMEOUT_SECONDS
+            )
+            self._logger.info(f"MR !{mr_iid} updated")
+            return True
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            self._logger.warning(f"Failed to update MR: {e}")
             return False
 
     def create_draft_mr(
