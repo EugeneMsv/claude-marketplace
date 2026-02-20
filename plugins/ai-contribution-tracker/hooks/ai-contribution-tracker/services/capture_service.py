@@ -3,18 +3,24 @@
 from collections import Counter
 from logging import Logger
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 from domain.line_hasher import LineHasher
 from domain.tracking_data import TrackingData
 from infrastructure.git_repository import GitRepository
 from infrastructure.configuration import Configuration
 from infrastructure.tracking_repository import TrackingRepository
+from infrastructure.write_snapshot_repository import WriteSnapshotRepository
 
 
 class CaptureService:
     """Service coordinating the capture hook workflow.
 
     Processes Write/Edit tool use events to track AI-authored lines.
+    Works in two phases for Write operations:
+      1. store_pre_write_snapshot() — called by PreToolUse Write hook, captures
+         existing file content before the overwrite.
+      2. process_write() — called by PostToolUse Write hook, reads the snapshot
+         to compute added/removed lines correctly.
     """
 
     def __init__(
@@ -22,7 +28,8 @@ class CaptureService:
         git_repo: GitRepository,
         config: Configuration,
         hasher: LineHasher,
-        logger: Logger
+        logger: Logger,
+        write_snapshot_repo: WriteSnapshotRepository
     ):
         """Initialize capture service.
 
@@ -31,18 +38,40 @@ class CaptureService:
             config: Configuration settings
             hasher: LineHasher for computing line hashes
             logger: Logger instance with hook context
+            write_snapshot_repo: Repository for storing pre-write file snapshots
         """
         self._git_repo = git_repo
         self._config = config
         self._hasher = hasher
         self._logger = logger
+        self._write_snapshot_repo = write_snapshot_repo
+
+    def store_pre_write_snapshot(self, file_path: str) -> None:
+        """Snapshot existing file content before a Write tool overwrites it.
+
+        Called by the PreToolUse Write hook. Reads the file from disk and saves
+        its content to the snapshot repository so that process_write() can later
+        compute what lines were removed.
+
+        Args:
+            file_path: Absolute path to the file about to be written.
+        """
+        if not file_path:
+            return
+
+        try:
+            content = Path(file_path).read_text(encoding='utf-8')
+        except (FileNotFoundError, OSError):
+            content = ''
+
+        self._write_snapshot_repo.save(file_path, content)
 
     def process_write(self, tool_input: Dict) -> bool:
         """Process a Write tool use event.
 
-        Reads the file's current on-disk content before it is overwritten so
-        that lines AI is replacing are recorded as AI-removed, not human-removed.
-        For new files the existing content is treated as empty.
+        Reads the pre-write snapshot (saved by store_pre_write_snapshot before
+        the Write ran) to determine which lines were removed. For new files the
+        snapshot returns '', so all lines are recorded as AI-added.
 
         Args:
             tool_input: Tool input dictionary containing file_path and content
@@ -52,12 +81,7 @@ class CaptureService:
         """
         file_path = tool_input.get('file_path', '')
         new_content = tool_input.get('content', '')
-
-        try:
-            existing_content = Path(file_path).read_text(encoding='utf-8')
-        except (FileNotFoundError, OSError):
-            existing_content = ''
-
+        existing_content = self._write_snapshot_repo.load_and_delete(file_path)
         added_lines = self._diff_lines(existing_content, new_content)
         removed_lines = self._diff_lines(new_content, existing_content)
         return self._process(file_path, added_lines, removed_lines)

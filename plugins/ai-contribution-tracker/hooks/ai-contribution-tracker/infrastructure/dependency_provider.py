@@ -79,11 +79,24 @@ class DependencyProvider:
 
     # --- Service builders ---
 
+    def build_write_snapshot_repo(self) -> WriteSnapshotRepository:
+        """Build and return a WriteSnapshotRepository for the current git root.
+
+        Returns a repository wired to the project's .claude/write-snapshots/
+        directory. If git root is unavailable, the repository's methods are
+        safe no-ops (save returns False, load_and_delete returns '').
+        """
+        from infrastructure.write_snapshot_repository import WriteSnapshotRepository
+        return WriteSnapshotRepository(self.git_repo().get_root())
+
     def build_capture_service(self) -> CaptureService:
         """Build and return a fully-wired CaptureService."""
         from domain.line_hasher import LineHasher
         from services.capture_service import CaptureService
-        return CaptureService(self.git_repo(), self.config(), LineHasher(), self.logger())
+        return CaptureService(
+            self.git_repo(), self.config(), LineHasher(), self.logger(),
+            self.build_write_snapshot_repo()
+        )
 
     def build_inject_service(self) -> InjectService:
         """Build and return a fully-wired InjectService."""

@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from infrastructure.dependency_provider import DependencyProvider
 from infrastructure.configuration import Configuration
+from infrastructure.write_snapshot_repository import WriteSnapshotRepository
 from services.bash_command_detector import BashCommandDetector
 from services.capture_service import CaptureService
 from services.inject_service import InjectService
@@ -172,3 +173,19 @@ class TestServiceBuilders:
         provider = self._make_provider()
         result = provider.build_housekeeping_service()
         assert isinstance(result, HousekeepingService)
+
+    def test_build_write_snapshot_repo_returns_correct_type(self):
+        """build_write_snapshot_repo() returns a WriteSnapshotRepository."""
+        provider = self._make_provider()
+        result = provider.build_write_snapshot_repo()
+        assert isinstance(result, WriteSnapshotRepository)
+
+    def test_build_write_snapshot_repo_returns_none_safe_instance_when_no_git_root(self):
+        """build_write_snapshot_repo() returns a repo with None git_root when unavailable."""
+        provider = self._make_provider()
+        provider._git_repo.get_root.return_value = None
+        repo = provider.build_write_snapshot_repo()
+        # Repo is still a WriteSnapshotRepository — its methods are safe no-ops
+        assert isinstance(repo, WriteSnapshotRepository)
+        assert repo.save('/any/file.py', 'content') is False
+        assert repo.load_and_delete('/any/file.py') == ''

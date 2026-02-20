@@ -16,6 +16,7 @@ from domain.line_hasher import LineHasher
 from infrastructure.git_repository import GitRepository
 from infrastructure.configuration import Configuration
 from infrastructure.tracking_repository import TrackingRepository
+from infrastructure.write_snapshot_repository import WriteSnapshotRepository
 from logging import Logger, INFO
 import logging
 
@@ -67,7 +68,7 @@ class TestCaptureToStats:
     ):
         """Given Edit with duplicate lines, full pipeline tracks and calculates correctly."""
         # Setup
-        capture_service = CaptureService(git_repo, config, hasher, logger)
+        capture_service = CaptureService(git_repo, config, hasher, logger, WriteSnapshotRepository(temp_dir))
         stats_calculator = StatsCalculator(hasher)
 
         # Create test file
@@ -273,7 +274,7 @@ class TestEndToEnd:
     ):
         """Test complete workflow: Write → Capture → Storage → Stats."""
         # Create services
-        capture_service = CaptureService(git_repo, config, hasher, logger)
+        capture_service = CaptureService(git_repo, config, hasher, logger, WriteSnapshotRepository(temp_dir))
         stats_calculator = StatsCalculator(hasher)
         tracking_repo = TrackingRepository(temp_dir, "test-branch")
 
