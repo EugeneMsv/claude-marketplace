@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "name": "eug-msv-claude-marketplace",
   "description": "Plugin marketplace for Claude Code from Eugene Moiseev",
   "updated": "2026-02-19",
@@ -13,7 +13,7 @@
       "name": "ai-contribution-tracker",
       "source": "./plugins/ai-contribution-tracker",
       "description": "Track and report AI assistant contributions to the codebase",
-      "version": "0.0.5",
+      "version": "0.0.6",
       "author": {
         "name": "Eugene Moiseev"
       },
