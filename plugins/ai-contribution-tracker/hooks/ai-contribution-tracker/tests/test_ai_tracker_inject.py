@@ -54,9 +54,9 @@ def _run_main(command: str, enabled: bool = True):
     mock_provider.build_inject_service.return_value = mock_service
 
     with patch("sys.stdin", StringIO(_make_hook_input(command))), \
-         patch("infrastructure.configuration.ConfigurationLoader.resolve_plugin_version", return_value="test"), \
+         patch("infrastructure.hook_runner.ConfigurationLoader.resolve_plugin_version", return_value="test"), \
          patch("infrastructure.hook_output_service.HookOutputService.exit_with_success", side_effect=SystemExit(0)), \
-         patch("infrastructure.dependency_provider.DependencyProvider", return_value=mock_provider):
+         patch("infrastructure.hook_runner.DependencyProvider", return_value=mock_provider):
         try:
             spec = importlib.util.spec_from_file_location(
                 "ai_tracker_inject",

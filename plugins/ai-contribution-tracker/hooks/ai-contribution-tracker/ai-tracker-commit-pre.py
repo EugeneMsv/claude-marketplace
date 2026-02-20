@@ -16,40 +16,33 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from infrastructure.configuration import ConfigurationLoader
 from infrastructure.dependency_provider import DependencyProvider
 from infrastructure.hook_output_service import HookOutputService
+from infrastructure.hook_runner import run_hook
 from services.bash_command_detector import DetectedCommand
+
+
+def _handle(provider: DependencyProvider, hook_output: HookOutputService) -> None:
+    input_data = json.load(sys.stdin)
+    tool_input = input_data.get('tool_input', {})
+    command = tool_input.get('command', '')
+
+    if not command:
+        hook_output.exit_with_success()
+
+    # Early exit: only act on non-amend git commits
+    if DetectedCommand.GIT_COMMIT not in provider.bash_command_detector().detect_commands(command):
+        hook_output.exit_with_success()
+
+    if not provider.config().enabled:
+        hook_output.exit_with_success()
+
+    provider.build_inject_service().record_commit_intent()
 
 
 def main():
     """Record commit intent before a git commit command runs."""
-    version = ConfigurationLoader.resolve_plugin_version()
-    hook_output = HookOutputService(version)
-    provider = DependencyProvider('COMMIT-PRE')
-
-    try:
-        input_data = json.load(sys.stdin)
-        tool_input = input_data.get('tool_input', {})
-        command = tool_input.get('command', '')
-
-        if not command:
-            hook_output.exit_with_success()
-
-        # Early exit: only act on non-amend git commits
-        if DetectedCommand.GIT_COMMIT not in provider.bash_command_detector().detect_commands(command):
-            hook_output.exit_with_success()
-
-        if not provider.config().enabled:
-            hook_output.exit_with_success()
-
-        provider.build_inject_service().record_commit_intent()
-
-    except Exception:
-        # Never block the user's command
-        pass
-
-    hook_output.exit_with_success()
+    run_hook('COMMIT-PRE', _handle)
 
 
 if __name__ == '__main__':
