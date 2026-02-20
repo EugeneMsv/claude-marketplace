@@ -40,15 +40,27 @@ class CaptureService:
     def process_write(self, tool_input: Dict) -> bool:
         """Process a Write tool use event.
 
+        Reads the file's current on-disk content before it is overwritten so
+        that lines AI is replacing are recorded as AI-removed, not human-removed.
+        For new files the existing content is treated as empty.
+
         Args:
             tool_input: Tool input dictionary containing file_path and content
 
         Returns:
             True if processing succeeded
         """
-        content = tool_input.get('content', '')
-        added_lines = content.splitlines()
-        return self._process(tool_input.get('file_path', ''), added_lines, [])
+        file_path = tool_input.get('file_path', '')
+        new_content = tool_input.get('content', '')
+
+        try:
+            existing_content = Path(file_path).read_text(encoding='utf-8')
+        except (FileNotFoundError, OSError):
+            existing_content = ''
+
+        added_lines = self._diff_lines(existing_content, new_content)
+        removed_lines = self._diff_lines(new_content, existing_content)
+        return self._process(file_path, added_lines, removed_lines)
 
     def process_edit(self, tool_input: Dict) -> bool:
         """Process an Edit tool use event.

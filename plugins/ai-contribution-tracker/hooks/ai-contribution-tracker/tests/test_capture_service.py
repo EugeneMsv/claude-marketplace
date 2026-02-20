@@ -202,6 +202,57 @@ class TestProcessWrite:
             result = service.process_write(tool_input)
             assert result is False
 
+    def test_write_new_file_tracks_all_lines_as_added_none_removed(self):
+        """Given a Write to a non-existent file, all lines are AI-added and nothing is AI-removed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            git_root = Path(tmpdir)
+            (git_root / ".claude").mkdir()
+            service = _make_service(git_root)
+
+            tool_input = {"file_path": str(git_root / "app.py"), "content": "def foo():\n    pass\n"}
+            service.process_write(tool_input)
+
+            tracking = TrackingRepository(git_root, "feature-test").load()
+            assert len(tracking.ai_line_hashes.get("app.py", {})) > 0
+            assert tracking.ai_removed_line_hashes.get("app.py", {}) == {}
+
+    def test_write_overwrites_existing_file_tracks_removed_lines(self):
+        """Given a Write that replaces an existing file, deleted lines are recorded as AI-removed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            git_root = Path(tmpdir)
+            (git_root / ".claude").mkdir()
+            service = _make_service(git_root)
+
+            target = git_root / "app.py"
+            target.write_text("def old_func():\n    return 1\n", encoding="utf-8")
+
+            tool_input = {"file_path": str(target), "content": "def new_func():\n    return 2\n"}
+            service.process_write(tool_input)
+
+            tracking = TrackingRepository(git_root, "feature-test").load()
+            # New lines are AI-added
+            assert len(tracking.ai_line_hashes.get("app.py", {})) > 0
+            # Old lines are AI-removed
+            assert len(tracking.ai_removed_line_hashes.get("app.py", {})) > 0
+
+    def test_write_same_content_records_no_adds_no_removals(self):
+        """Given a Write with identical content to what is on disk, nothing is tracked."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            git_root = Path(tmpdir)
+            (git_root / ".claude").mkdir()
+            service = _make_service(git_root)
+
+            content = "def foo():\n    pass\n"
+            target = git_root / "app.py"
+            target.write_text(content, encoding="utf-8")
+
+            tool_input = {"file_path": str(target), "content": content}
+            service.process_write(tool_input)
+
+            tracking = TrackingRepository(git_root, "feature-test").load()
+            assert tracking.ai_line_hashes.get("app.py", {}) == {}
+            assert tracking.ai_removed_line_hashes.get("app.py", {}) == {}
+
 
 class TestProcessEdit:
     """Tests for process_edit."""
