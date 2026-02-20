@@ -1,6 +1,5 @@
 """Format snapshot service for capturing pre-format state."""
 
-import logging
 from logging import Logger
 from pathlib import Path
 from typing import Dict, Optional
@@ -94,7 +93,7 @@ class FormatSnapshotService:
             self._logger.info(f"Saved snapshot to {snapshot_path}")
             return str(snapshot_path)
         except Exception as e:
-            logging.error(f"Failed to save snapshot: {e}")
+            self._logger.error(f"Failed to save snapshot: {e}")
             return None
 
     def _capture_file_content(
@@ -137,6 +136,6 @@ class FormatSnapshotService:
                     hash_to_content[line_hash] = line.rstrip('\n\r')
 
         except Exception as e:
-            logging.error(f"Failed to read {file_path}: {e}")
+            self._logger.error(f"Failed to read {file_path}: {e}")
 
         return hash_to_content
