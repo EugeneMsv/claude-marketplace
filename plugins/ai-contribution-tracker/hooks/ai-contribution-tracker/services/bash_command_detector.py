@@ -14,31 +14,49 @@ class DetectedCommand(Enum):
     GIT_COMMIT = "git_commit"
     GIT_COMMIT_AMEND = "git_commit_amend"
     GIT_PUSH = "git_push"
+    GIT_PUSH_TAGS = "git_push_tags"
+    CODE_FORMATTER = "code_formatter"
     UNIDENTIFIED = "unidentified"
-
-
-# Each entry maps a DetectedCommand to its predicate.
-# GIT_COMMIT and GIT_COMMIT_AMEND are mutually exclusive by predicate design.
-# GIT_PUSH is independent and can coexist with either commit variant.
-_PREDICATES: dict[DetectedCommand, Callable[[str], bool]] = {
-    DetectedCommand.GIT_COMMIT: lambda cmd: bool(_COMMIT_PATTERN.search(cmd)) and '--amend' not in cmd,
-    DetectedCommand.GIT_COMMIT_AMEND: lambda cmd: bool(_COMMIT_PATTERN.search(cmd)) and '--amend' in cmd,
-    DetectedCommand.GIT_PUSH: lambda cmd: bool(_PUSH_PATTERN.search(cmd)),
-}
 
 
 class BashCommandDetector:
     """Detects git command patterns in bash command strings.
 
-    Centralizes command pattern detection used across hooks and services.
+    Instance-based; constructor receives config so that CODE_FORMATTER
+    predicate is built from the configured formatter list.
     """
 
-    @staticmethod
-    def detect_commands(command: str) -> set[DetectedCommand]:
+    def __init__(self, config):
+        """Initialize detector with configuration.
+
+        Args:
+            config: Configuration object with format_commands list
+        """
+        format_commands = config.format_commands or []
+        if format_commands:
+            patterns = [rf'\b{re.escape(cmd)}\b' for cmd in format_commands]
+            formatter_pattern = re.compile('|'.join(patterns))
+            formatter_predicate: Callable[[str], bool] = lambda cmd, p=formatter_pattern: bool(p.search(cmd))
+        else:
+            formatter_predicate = lambda cmd: False
+
+        # Each entry maps a DetectedCommand to its predicate.
+        # GIT_COMMIT and GIT_COMMIT_AMEND are mutually exclusive by predicate design.
+        # GIT_PUSH and GIT_PUSH_TAGS are mutually exclusive by predicate design.
+        self._predicates: dict[DetectedCommand, Callable[[str], bool]] = {
+            DetectedCommand.GIT_COMMIT: lambda cmd: bool(_COMMIT_PATTERN.search(cmd)) and '--amend' not in cmd,
+            DetectedCommand.GIT_COMMIT_AMEND: lambda cmd: bool(_COMMIT_PATTERN.search(cmd)) and '--amend' in cmd,
+            DetectedCommand.GIT_PUSH_TAGS: lambda cmd: bool(_PUSH_PATTERN.search(cmd)) and ('--tags' in cmd or 'refs/tags/' in cmd),
+            DetectedCommand.GIT_PUSH: lambda cmd: bool(_PUSH_PATTERN.search(cmd)) and '--tags' not in cmd and 'refs/tags/' not in cmd,
+            DetectedCommand.CODE_FORMATTER: formatter_predicate,
+        }
+
+    def detect_commands(self, command: str) -> set[DetectedCommand]:
         """Return the set of commands detected in the given bash command string.
 
         GIT_COMMIT and GIT_COMMIT_AMEND are mutually exclusive.
-        GIT_PUSH may appear alongside either.
+        GIT_PUSH and GIT_PUSH_TAGS are mutually exclusive.
+        CODE_FORMATTER only matches when format_commands is non-empty.
         Returns {UNIDENTIFIED} when no known command is detected or input is empty.
 
         Args:
@@ -49,5 +67,5 @@ class BashCommandDetector:
         """
         if not command:
             return {DetectedCommand.UNIDENTIFIED}
-        result = {cmd for cmd, predicate in _PREDICATES.items() if predicate(command)}
+        result = {cmd for cmd, predicate in self._predicates.items() if predicate(command)}
         return result or {DetectedCommand.UNIDENTIFIED}

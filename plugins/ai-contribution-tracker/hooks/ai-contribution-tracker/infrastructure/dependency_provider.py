@@ -1,0 +1,113 @@
+"""Centralized lazy service factory for AI contribution tracker hooks."""
+
+from logging import Logger
+from pathlib import Path
+from typing import Optional
+
+from infrastructure.configuration import Configuration, ConfigurationLoader
+from infrastructure.git_repository import GitRepository
+from infrastructure.glab_repository import GlabRepository
+from infrastructure.hook_logger import setup_hook_logger
+
+
+class DependencyProvider:
+    """Centralized, lazy dependency factory for hook entry points.
+
+    Created once per hook invocation with the hook's log-prefix name.
+    Config, logger, and git_repo are cached (created on first access).
+    GlabRepository is not cached since it wraps the logger.
+
+    Usage:
+        provider = DependencyProvider('CAPTURE')
+        if not provider.config().enabled:
+            hook_output.exit_with_success()
+        service = provider.build_capture_service()
+    """
+
+    def __init__(self, hook_name: str):
+        """Initialize provider for the given hook.
+
+        Args:
+            hook_name: Hook identifier used as logger prefix (e.g. 'CAPTURE', 'INJECT')
+        """
+        self._hook_name = hook_name
+        self._config: Optional[Configuration] = None
+        self._logger: Optional[Logger] = None
+        self._trace_id: Optional[str] = None
+        self._git_repo: Optional[GitRepository] = None
+
+    def config(self) -> Configuration:
+        """Return cached Configuration, loading it on first call."""
+        if self._config is None:
+            self._config = ConfigurationLoader.load()
+        return self._config
+
+    def logger(self) -> Logger:
+        """Return cached logger adapter, setting it up on first call."""
+        if self._logger is None:
+            log_path = ConfigurationLoader.resolve_log_path(self.config())
+            self._logger, self._trace_id = setup_hook_logger(
+                self._hook_name, log_path, self.config().enable_logging
+            )
+        return self._logger
+
+    def trace_id(self) -> Optional[str]:
+        """Return trace ID (available after first logger() call)."""
+        if self._trace_id is None:
+            self.logger()  # triggers setup
+        return self._trace_id
+
+    def git_repo(self) -> GitRepository:
+        """Return cached GitRepository instance."""
+        if self._git_repo is None:
+            self._git_repo = GitRepository()
+        return self._git_repo
+
+    def glab_repo(self) -> GlabRepository:
+        """Return a new GlabRepository wrapping the current logger (not cached)."""
+        return GlabRepository(self.logger())
+
+    def bash_command_detector(self):
+        """Return a BashCommandDetector configured from current config."""
+        from services.bash_command_detector import BashCommandDetector
+        return BashCommandDetector(self.config())
+
+    # --- Service builders ---
+
+    def build_capture_service(self):
+        """Build and return a fully-wired CaptureService."""
+        from domain.line_hasher import LineHasher
+        from services.capture_service import CaptureService
+        return CaptureService(self.git_repo(), self.config(), LineHasher(), self.logger())
+
+    def build_inject_service(self):
+        """Build and return a fully-wired InjectService."""
+        from domain.line_hasher import LineHasher
+        from services.stats_calculator import StatsCalculator
+        from services.inject_service import InjectService
+        hasher = LineHasher()
+        stats_calculator = StatsCalculator(hasher)
+        return InjectService(self.git_repo(), self.config(), stats_calculator, self.logger())
+
+    def build_mr_service(self):
+        """Build and return a fully-wired MrService."""
+        from services.mr_service import MrService
+        return MrService(self.git_repo(), self.glab_repo(), self.config(), self.logger())
+
+    def build_format_snapshot_service(self):
+        """Build and return a fully-wired FormatSnapshotService."""
+        from domain.line_hasher import LineHasher
+        from services.format_snapshot_service import FormatSnapshotService
+        return FormatSnapshotService(self.git_repo(), self.config(), LineHasher(), self.logger())
+
+    def build_format_tracker_service(self):
+        """Build and return a fully-wired FormatTrackerService."""
+        from domain.line_hasher import LineHasher
+        from domain.token_normalizer import TokenNormalizer
+        from services.format_tracker_service import FormatTrackerService
+        return FormatTrackerService(self.git_repo(), self.config(), LineHasher(), TokenNormalizer(), self.logger())
+
+    def build_housekeeping_service(self):
+        """Build and return a fully-wired HousekeepingService."""
+        from services.housekeeping_service import HousekeepingService
+        return HousekeepingService(self.git_repo(), self.config(), self.logger())

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AI Contribution Tracker - Inject Hook (PostToolUse Bash) - OOP Version
+AI Contribution Tracker - Inject Hook (PostToolUse Bash)
 
 Runs after git commit and amends the commit message with AI contribution stats.
 Part of the ai-contribution-tracker system.
@@ -14,78 +14,60 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
-# Import OOP components
 from infrastructure.configuration import ConfigurationLoader
-from infrastructure.git_repository import GitRepository
-from infrastructure.hook_logger import setup_hook_logger
+from infrastructure.dependency_provider import DependencyProvider
 from infrastructure.hook_output_service import HookOutputService
-from domain.line_hasher import LineHasher
-from services.bash_command_detector import BashCommandDetector, DetectedCommand
-from services.stats_calculator import StatsCalculator
-from services.inject_service import InjectService
+from services.bash_command_detector import DetectedCommand
 
 
 def main():
     """Main hook execution: run after git commit and amend with stats."""
     version = ConfigurationLoader.resolve_plugin_version()
     hook_output = HookOutputService(version)
+    provider = DependencyProvider('INJECT')
 
     try:
-        # Load configuration
-        config = ConfigurationLoader.load()
-
-        # Setup logging with hook prefix and traceId
-        log_path = ConfigurationLoader.resolve_log_path(config)
-        logger, trace_id = setup_hook_logger('INJECT', log_path, config.enable_logging)
-
-        # Check if feature is enabled
-        if not config.enabled:
-            logger.info("AI tracker disabled in config")
-            hook_output.exit_with_success()
-
-        # Read hook input
         hook_input = json.load(sys.stdin)
         tool_input = hook_input.get('tool_input', {})
         command = tool_input.get('command', '')
 
-        # Create service instances
-        git_repo = GitRepository()
-        hasher = LineHasher()
-        stats_calculator = StatsCalculator(hasher)
-        service = InjectService(git_repo, config, stats_calculator, logger)
-
-        # Normal path: inject when this command is a non-amend git commit
-        detected = BashCommandDetector.detect_commands(command)
-        if DetectedCommand.GIT_COMMIT in detected:
-            logger.info("Git commit command detected")
-            result = service.process_commit()
-        elif DetectedCommand.GIT_PUSH in detected:
-            # Recovery path: a push after a failed chained commit may have a missed inject
-            result = service.recover_missed_commit()
-        else:
+        # Early exit: only handle git commit and git push (recovery path)
+        detected = provider.bash_command_detector().detect_commands(command)
+        if DetectedCommand.GIT_COMMIT not in detected and DetectedCommand.GIT_PUSH not in detected:
             hook_output.exit_with_success()
 
+        if not provider.config().enabled:
+            provider.logger().info("AI tracker disabled in config")
+            hook_output.exit_with_success()
+
+        service = provider.build_inject_service()
+
+        if DetectedCommand.GIT_COMMIT in detected:
+            provider.logger().info("Git commit command detected")
+            result = service.process_commit()
+        else:
+            # Recovery path: push after failed chained commit
+            result = service.recover_missed_commit()
+
         # Run housekeeping if enabled
-        if config.housekeeping_enabled:
+        if provider.config().housekeeping_enabled:
             try:
-                from services.housekeeping_service import HousekeepingService
-                housekeeping = HousekeepingService(git_repo, config, logger)
+                housekeeping = provider.build_housekeeping_service()
                 cleanup_result = housekeeping.cleanup_stale_tracking_files()
-                logger.info(
+                provider.logger().info(
                     f"Housekeeping: deleted={cleanup_result.files_deleted}, "
                     f"skipped={cleanup_result.files_skipped}, errors={cleanup_result.files_errored}"
                 )
             except Exception as e:
                 # Never fail inject flow due to housekeeping
-                logger.warning(f"Housekeeping failed: {e}")
+                provider.logger().warning(f"Housekeeping failed: {e}")
 
-        if config.enable_logging:
+        if provider.config().enable_logging:
             if result.success:
-                logger.info("Commit amended successfully")
+                provider.logger().info("Commit amended successfully")
             else:
-                logger.info("Skipped (not applicable)")
+                provider.logger().info("Skipped (not applicable)")
 
-        # Show user message if available
         if result.message:
             hook_output.exit_with_success(result.message)
         elif result.success and result.ai_percentage is not None:
@@ -93,11 +75,8 @@ def main():
 
     except Exception as e:
         try:
-            config = ConfigurationLoader.load()
-            if config.enable_logging:
-                log_path = ConfigurationLoader.resolve_log_path(config)
-                error_logger, _ = setup_hook_logger('INJECT', log_path, True)
-                error_logger.error(f"Hook failed: {e}", exc_info=True)
+            if provider.config().enable_logging:
+                provider.logger().error(f"Hook failed: {e}", exc_info=True)
         except:
             pass
 

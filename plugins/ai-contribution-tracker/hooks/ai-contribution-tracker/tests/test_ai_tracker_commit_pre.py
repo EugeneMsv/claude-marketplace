@@ -4,6 +4,7 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -12,7 +13,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from domain.tracking_data import TrackingData
 from infrastructure.git_repository import GitRepository
 from infrastructure.tracking_repository import TrackingRepository
+from infrastructure.configuration import Configuration
 from services.bash_command_detector import BashCommandDetector, DetectedCommand
+
+
+def _make_detector():
+    """Build a detector with no format commands (commit-pre doesn't need them)."""
+    config = MagicMock()
+    config.format_commands = []
+    return BashCommandDetector(config)
 
 
 @pytest.fixture
@@ -37,7 +46,8 @@ class TestCommitIntentRecording:
         tracking_repo = TrackingRepository(git_root, sanitized)
         tracking_repo.save(tracking)
 
-        if DetectedCommand.GIT_COMMIT not in BashCommandDetector.detect_commands(command):
+        detector = _make_detector()
+        if DetectedCommand.GIT_COMMIT not in detector.detect_commands(command):
             return tracking_repo.load()
 
         loaded = tracking_repo.load()
@@ -106,6 +116,7 @@ class TestBashCommandDetectorIntegration:
     ])
     def test_command_classification(self, command, expect_commit, expect_amend):
         """Given various commands, detector classifies correctly."""
-        detected = BashCommandDetector.detect_commands(command)
+        detector = _make_detector()
+        detected = detector.detect_commands(command)
         assert (DetectedCommand.GIT_COMMIT in detected) == expect_commit
         assert (DetectedCommand.GIT_COMMIT_AMEND in detected) == expect_amend

@@ -44,15 +44,19 @@ def _run_main(command: str, enabled: bool = True):
 
     config = _make_config(enabled)
 
+    mock_provider = MagicMock()
+    mock_provider.config.return_value = config
+    mock_provider.bash_command_detector.return_value = MagicMock(
+        detect_commands=lambda cmd: __import__(
+            'services.bash_command_detector', fromlist=['BashCommandDetector']
+        ).BashCommandDetector(config).detect_commands(cmd)
+    )
+    mock_provider.build_inject_service.return_value = mock_service
+
     with patch("sys.stdin", StringIO(_make_hook_input(command))), \
-         patch("infrastructure.configuration.ConfigurationLoader.load", return_value=config), \
          patch("infrastructure.configuration.ConfigurationLoader.resolve_plugin_version", return_value="test"), \
-         patch("infrastructure.configuration.ConfigurationLoader.resolve_log_path", return_value=Path("/tmp/test.log")), \
          patch("infrastructure.hook_output_service.HookOutputService.exit_with_success", side_effect=SystemExit(0)), \
-         patch("infrastructure.git_repository.GitRepository"), \
-         patch("domain.line_hasher.LineHasher"), \
-         patch("services.stats_calculator.StatsCalculator"), \
-         patch("services.inject_service.InjectService", return_value=mock_service):
+         patch("infrastructure.dependency_provider.DependencyProvider", return_value=mock_provider):
         try:
             spec = importlib.util.spec_from_file_location(
                 "ai_tracker_inject",

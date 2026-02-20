@@ -1,16 +1,24 @@
 """Tests for CaptureService."""
 
 import sys
+import tempfile
+import logging
 from pathlib import Path
+from unittest.mock import MagicMock
+
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from services.capture_service import CaptureService
+from domain.line_hasher import LineHasher
+from domain.tracking_data import TrackingData
+from infrastructure.tracking_repository import TrackingRepository
+from infrastructure.git_repository import GitRepository
 
 
 class TestDiffLines:
-    """Tests for _diff_lines method."""
+    """Tests for _diff_lines static method."""
 
     def test_no_duplicates_basic_case(self):
         """Given unique lines in both old and new, returns only new unique lines."""
@@ -140,3 +148,87 @@ def method2():
         assert sorted(result) == ["line B", "line B", "line C"]
         assert result.count("line B") == 2
         assert result.count("line C") == 1
+
+
+def _make_service(git_root: Path, branch: str = "feature/test", tracked_ext=".py"):
+    """Build a CaptureService wired to a real temp git_root."""
+    git_repo = MagicMock()
+    git_repo.get_root.return_value = git_root
+    git_repo.get_current_branch.return_value = branch
+    git_repo.sanitize_branch_name = GitRepository.sanitize_branch_name
+
+    config = MagicMock()
+    config.should_track_file.side_effect = lambda p: p.suffix.lower() == tracked_ext
+
+    hasher = LineHasher()
+    logger = logging.getLogger("test")
+
+    return CaptureService(git_repo, config, hasher, logger)
+
+
+class TestProcessWrite:
+    """Tests for process_write."""
+
+    def test_write_tracks_content_lines(self):
+        """Given a Write event, each content line is tracked."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            git_root = Path(tmpdir)
+            (git_root / ".claude").mkdir()
+            service = _make_service(git_root)
+
+            tool_input = {"file_path": str(git_root / "app.py"), "content": "line A\nline B\nline C"}
+            result = service.process_write(tool_input)
+
+            assert result is True
+            tracking_repo = TrackingRepository(git_root, "feature-test")
+            tracking = tracking_repo.load()
+            assert tracking is not None
+            assert "app.py" in tracking.files_tracked
+
+    def test_write_empty_file_path_returns_false(self):
+        """Given no file_path in input, returns False."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            service = _make_service(Path(tmpdir))
+            result = service.process_write({"content": "some content"})
+            assert result is False
+
+    def test_write_untracked_extension_returns_false(self):
+        """Given file with untracked extension, returns False."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            git_root = Path(tmpdir)
+            service = _make_service(git_root)  # only .py tracked
+
+            tool_input = {"file_path": str(git_root / "readme.md"), "content": "hello"}
+            result = service.process_write(tool_input)
+            assert result is False
+
+
+class TestProcessEdit:
+    """Tests for process_edit."""
+
+    def test_edit_tracks_added_lines(self):
+        """Given an Edit event, newly added lines are tracked."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            git_root = Path(tmpdir)
+            (git_root / ".claude").mkdir()
+            service = _make_service(git_root)
+
+            tool_input = {
+                "file_path": str(git_root / "app.py"),
+                "old_string": "line A",
+                "new_string": "line A\nline B",
+            }
+            result = service.process_edit(tool_input)
+
+            assert result is True
+            tracking_repo = TrackingRepository(git_root, "feature-test")
+            tracking = tracking_repo.load()
+            assert tracking is not None
+            assert "app.py" in tracking.files_tracked
+
+    def test_edit_empty_file_path_returns_false(self):
+        """Given no file_path in input, returns False."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            service = _make_service(Path(tmpdir))
+            result = service.process_edit({"old_string": "a", "new_string": "b"})
+            assert result is False

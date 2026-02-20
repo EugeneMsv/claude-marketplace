@@ -16,55 +16,43 @@ SCRIPT_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from infrastructure.configuration import ConfigurationLoader
-from infrastructure.git_repository import GitRepository
-from infrastructure.glab_repository import GlabRepository
-from infrastructure.hook_logger import setup_hook_logger
+from infrastructure.dependency_provider import DependencyProvider
 from infrastructure.hook_output_service import HookOutputService
-from services.mr_service import MrService
+from services.bash_command_detector import DetectedCommand
 
 
 def main():
     """Main hook execution: run after git push and update MR title with stats."""
     version = ConfigurationLoader.resolve_plugin_version()
     hook_output = HookOutputService(version)
+    provider = DependencyProvider('MR-UPDATE')
 
     try:
-        # Load configuration
-        config = ConfigurationLoader.load()
-
-        # Setup logging with hook prefix and traceId
-        log_path = ConfigurationLoader.resolve_log_path(config)
-        logger, trace_id = setup_hook_logger('MR-UPDATE', log_path, config.enable_logging)
-
-        # Check if feature is enabled
-        if not config.enabled:
-            logger.info("AI tracker disabled in config")
-            hook_output.exit_with_success()
-
-        if not config.mr_features_enabled:
-            logger.info("All MR features disabled in config")
-            hook_output.exit_with_success()
-
-        # Read hook input
         hook_input = json.load(sys.stdin)
         tool_input = hook_input.get('tool_input', {})
         command = tool_input.get('command', '')
 
-        # Create service instances
-        git_repo = GitRepository()
-        glab_repo = GlabRepository(logger)
-        service = MrService(git_repo, glab_repo, config, logger)
+        # Early exit: only handle non-tag git push
+        detected = provider.bash_command_detector().detect_commands(command)
+        if DetectedCommand.GIT_PUSH not in detected:
+            hook_output.exit_with_success()
 
-        # Process push
-        result = service.process_push(command)
+        if not provider.config().enabled:
+            provider.logger().info("AI tracker disabled in config")
+            hook_output.exit_with_success()
 
-        if config.enable_logging:
+        if not provider.config().mr_features_enabled:
+            provider.logger().info("All MR features disabled in config")
+            hook_output.exit_with_success()
+
+        result = provider.build_mr_service().process_push()
+
+        if provider.config().enable_logging:
             if result.success:
-                logger.info("MR updated successfully")
+                provider.logger().info("MR updated successfully")
             else:
-                logger.info("Skipped (not applicable)")
+                provider.logger().info("Skipped (not applicable)")
 
-        # Show user message if available
         if result.message:
             hook_output.exit_with_success(result.message)
         elif result.success and result.ai_percentage is not None:
@@ -72,11 +60,8 @@ def main():
 
     except Exception as e:
         try:
-            config = ConfigurationLoader.load()
-            if config.enable_logging:
-                log_path = ConfigurationLoader.resolve_log_path(config)
-                error_logger, _ = setup_hook_logger('MR-UPDATE', log_path, True)
-                error_logger.error(f"Hook failed: {e}", exc_info=True)
+            if provider.config().enable_logging:
+                provider.logger().error(f"Hook failed: {e}", exc_info=True)
         except:
             pass
 

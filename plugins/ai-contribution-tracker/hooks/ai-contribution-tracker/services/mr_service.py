@@ -9,7 +9,6 @@ from infrastructure.git_repository import GitRepository
 from infrastructure.glab_repository import GlabRepository, MrInfo
 from infrastructure.configuration import Configuration
 from infrastructure.tracking_repository import TrackingRepository
-from services.bash_command_detector import BashCommandDetector, DetectedCommand
 
 
 @dataclass
@@ -73,23 +72,15 @@ class MrService:
         self._config = config
         self._logger = logger
 
-    def process_push(self, command: str) -> MrResult:
-        """Process a git push command.
+    def process_push(self) -> MrResult:
+        """Process a git push event.
 
-        Args:
-            command: Bash command that was executed
+        Caller is responsible for routing: only invoke when a non-tag git push
+        was detected and all feature flags are enabled.
 
         Returns:
             MrResult with success status and AI percentage if successful
         """
-        if DetectedCommand.GIT_PUSH not in BashCommandDetector.detect_commands(command):
-            self._logger.info("Not a git push command, exiting")
-            return MrResult(False)
-
-        if '--tags' in command or 'refs/tags/' in command:
-            self._logger.info("Tag push detected, skipping MR update")
-            return MrResult(False)
-
         self._logger.info("Git push command detected")
 
         # Get current branch
