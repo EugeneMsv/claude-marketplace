@@ -1,4 +1,4 @@
-"""Tests for BashCommandDetector."""
+"""Tests for BashCommandDetector.detect_commands."""
 
 import sys
 from pathlib import Path
@@ -7,78 +7,56 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from services.bash_command_detector import BashCommandDetector
+from services.bash_command_detector import BashCommandDetector, DetectedCommand
 
 
-class TestIsGitCommit:
+class TestDetectCommands:
 
-    @pytest.mark.parametrize("command", [
-        "git commit -m 'msg'",
-        "git add . && git commit -m 'msg'",
-        "git commit -m 'msg' && git push",
-        "git  commit -m 'msg'",  # extra whitespace
-        "git commit --amend",   # amend is still a commit
+    @pytest.mark.parametrize("command, expected", [
+        # Plain commits
+        ("git commit -m 'msg'",                         {DetectedCommand.GIT_COMMIT}),
+        ("git add . && git commit -m 'msg'",            {DetectedCommand.GIT_COMMIT}),
+        ("git  commit -m 'msg'",                        {DetectedCommand.GIT_COMMIT}),  # extra whitespace
+        # Amend commits
+        ("git commit --amend",                          {DetectedCommand.GIT_COMMIT_AMEND}),
+        ("git commit --amend -m 'msg'",                 {DetectedCommand.GIT_COMMIT_AMEND}),
+        ("git commit --amend --no-edit",                {DetectedCommand.GIT_COMMIT_AMEND}),
+        # Push only
+        ("git push",                                    {DetectedCommand.GIT_PUSH}),
+        ("git push origin main",                        {DetectedCommand.GIT_PUSH}),
+        ("git push --set-upstream origin feature",      {DetectedCommand.GIT_PUSH}),
+        ("git  push origin",                            {DetectedCommand.GIT_PUSH}),  # extra whitespace
+        # Commit + push (chained)
+        ("git commit -m 'msg' && git push",             {DetectedCommand.GIT_COMMIT, DetectedCommand.GIT_PUSH}),
+        ("git add . && git commit -m 'fix' && git push", {DetectedCommand.GIT_COMMIT, DetectedCommand.GIT_PUSH}),
+        # Amend + push (chained)
+        ("git commit --amend && git push",              {DetectedCommand.GIT_COMMIT_AMEND, DetectedCommand.GIT_PUSH}),
+        ("git commit --amend --no-edit && git push",    {DetectedCommand.GIT_COMMIT_AMEND, DetectedCommand.GIT_PUSH}),
+        # Unidentified
+        ("git status",                                  {DetectedCommand.UNIDENTIFIED}),
+        ("git add .",                                   {DetectedCommand.UNIDENTIFIED}),
+        ("echo commit something",                       {DetectedCommand.UNIDENTIFIED}),
+        ("echo push something",                         {DetectedCommand.UNIDENTIFIED}),
+        ("",                                            {DetectedCommand.UNIDENTIFIED}),
+        (None,                                          {DetectedCommand.UNIDENTIFIED}),
     ])
-    def test_returns_true_for_commit_commands(self, command):
-        """Given a command containing git commit, returns True."""
-        assert BashCommandDetector.is_git_commit(command) is True
+    def test_detect_commands(self, command, expected):
+        """Given a bash command string, detect_commands returns the correct set of DetectedCommand values."""
+        assert BashCommandDetector.detect_commands(command) == expected
 
-    @pytest.mark.parametrize("command", [
-        "git push",
-        "git add .",
-        "git status",
-        "echo commit something",
-        "",
-        None,
-    ])
-    def test_returns_false_for_non_commit_commands(self, command):
-        """Given a command without git commit (or empty/None), returns False."""
-        assert BashCommandDetector.is_git_commit(command) is False
-
-
-class TestIsGitCommitAmend:
-
-    @pytest.mark.parametrize("command", [
-        "git commit --amend",
-        "git commit --amend -m 'msg'",
-        "git commit --amend --no-edit",
-    ])
-    def test_returns_true_for_amend_commands(self, command):
-        """Given a command with --amend flag, returns True."""
-        assert BashCommandDetector.is_git_commit_amend(command) is True
-
-    @pytest.mark.parametrize("command", [
-        "git commit -m 'msg'",
-        "git push",
-        "git add . && git commit -m 'fix'",
-        "",
-    ])
-    def test_returns_false_for_non_amend_commands(self, command):
-        """Given a command without --amend, returns False."""
-        assert BashCommandDetector.is_git_commit_amend(command) is False
-
-
-class TestIsGitPush:
-
-    @pytest.mark.parametrize("command", [
-        "git push",
-        "git push origin main",
-        "git push --set-upstream origin feature",
-        "git add . && git commit -m 'msg' && git push",
-        "git  push origin",  # extra whitespace
-    ])
-    def test_returns_true_for_push_commands(self, command):
-        """Given a command containing git push, returns True."""
-        assert BashCommandDetector.is_git_push(command) is True
-
-    @pytest.mark.parametrize("command", [
-        "git commit -m 'msg'",
-        "git add .",
-        "git status",
-        "echo push something",
-        "",
-        None,
-    ])
-    def test_returns_false_for_non_push_commands(self, command):
-        """Given a command without git push (or empty/None), returns False."""
-        assert BashCommandDetector.is_git_push(command) is False
+    def test_git_commit_and_git_commit_amend_are_mutually_exclusive(self):
+        """GIT_COMMIT and GIT_COMMIT_AMEND never appear in the same result set."""
+        commands = [
+            "git commit -m 'msg'",
+            "git commit --amend",
+            "git commit --amend && git push",
+            "git commit -m 'msg' && git push",
+            "git push",
+            "",
+            None,
+        ]
+        for cmd in commands:
+            result = BashCommandDetector.detect_commands(cmd)
+            assert not (DetectedCommand.GIT_COMMIT in result and DetectedCommand.GIT_COMMIT_AMEND in result), (
+                f"Both GIT_COMMIT and GIT_COMMIT_AMEND found for: {cmd!r}"
+            )
