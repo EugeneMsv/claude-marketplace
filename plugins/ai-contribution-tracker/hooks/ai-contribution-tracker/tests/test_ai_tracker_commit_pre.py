@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from domain.tracking_data import TrackingData
 from infrastructure.git_repository import GitRepository
 from infrastructure.tracking_repository import TrackingRepository
-from services.bash_command_detector import BashCommandDetector
+from services.bash_command_detector import BashCommandDetector, DetectedCommand
 
 
 @pytest.fixture
@@ -37,9 +37,7 @@ class TestCommitIntentRecording:
         tracking_repo = TrackingRepository(git_root, sanitized)
         tracking_repo.save(tracking)
 
-        if not BashCommandDetector.is_git_commit(command):
-            return tracking_repo.load()
-        if BashCommandDetector.is_git_commit_amend(command):
+        if DetectedCommand.GIT_COMMIT not in BashCommandDetector.detect_commands(command):
             return tracking_repo.load()
 
         loaded = tracking_repo.load()
@@ -102,11 +100,12 @@ class TestBashCommandDetectorIntegration:
     @pytest.mark.parametrize("command,expect_commit,expect_amend", [
         ("git commit -m 'msg'", True, False),
         ("git add . && git commit -m 'msg' && git push", True, False),
-        ("git commit --amend --no-edit", True, True),
+        ("git commit --amend --no-edit", False, True),
         ("git push", False, False),
         ("git add .", False, False),
     ])
     def test_command_classification(self, command, expect_commit, expect_amend):
         """Given various commands, detector classifies correctly."""
-        assert BashCommandDetector.is_git_commit(command) == expect_commit
-        assert BashCommandDetector.is_git_commit_amend(command) == expect_amend
+        detected = BashCommandDetector.detect_commands(command)
+        assert (DetectedCommand.GIT_COMMIT in detected) == expect_commit
+        assert (DetectedCommand.GIT_COMMIT_AMEND in detected) == expect_amend

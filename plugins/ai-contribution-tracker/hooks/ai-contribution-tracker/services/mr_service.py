@@ -9,7 +9,7 @@ from infrastructure.git_repository import GitRepository
 from infrastructure.glab_repository import GlabRepository, MrInfo
 from infrastructure.configuration import Configuration
 from infrastructure.tracking_repository import TrackingRepository
-from services.bash_command_detector import BashCommandDetector
+from services.bash_command_detector import BashCommandDetector, DetectedCommand
 
 
 @dataclass
@@ -82,7 +82,7 @@ class MrService:
         Returns:
             MrResult with success status and AI percentage if successful
         """
-        if not BashCommandDetector.is_git_push(command):
+        if DetectedCommand.GIT_PUSH not in BashCommandDetector.detect_commands(command):
             self._logger.info("Not a git push command, exiting")
             return MrResult(False)
 
