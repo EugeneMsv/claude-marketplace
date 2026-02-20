@@ -1,6 +1,5 @@
 """Inject service for AI contribution tracking."""
 
-import subprocess
 from datetime import datetime
 from logging import Logger
 from typing import Optional
@@ -144,6 +143,32 @@ class InjectService:
             self._logger.info("=== Recovered missed commit injection ===")
         return result
 
+    def record_commit_intent(self) -> None:
+        """Record HEAD hash before a commit runs to enable missed-commit recovery.
+
+        Called by the PreToolUse hook before a non-amend git commit executes.
+        Stores the current HEAD in pending_inject_head so recover_missed_commit
+        can detect if the commit succeeded but PostToolUse was skipped.
+        """
+        git_root = self._git_repo.get_root()
+        branch = self._git_repo.get_current_branch()
+        if not git_root or not branch:
+            return
+
+        sanitized_branch = GitRepository.sanitize_branch_name(branch)
+        tracking_repo = TrackingRepository(git_root, sanitized_branch)
+        tracking = tracking_repo.load()
+        if not tracking:
+            return
+
+        head_hash = self._git_repo.get_head_commit_hash()
+        if not head_hash:
+            return
+
+        tracking.pending_inject_head = head_hash
+        tracking_repo.save(tracking)
+        self._logger.info(f"Commit intent recorded: head_before={head_hash[:8]}")
+
     def _do_inject(self, tracking: TrackingData, tracking_repo: TrackingRepository) -> InjectResult:
         """Calculate stats and amend the current HEAD commit message.
 
@@ -188,15 +213,10 @@ class InjectService:
 
         self._logger.info("New message with stats appended")
 
-        try:
-            subprocess.run(
-                ['git', 'commit', '--amend', '-m', new_message],
-                check=True,
-                capture_output=True
-            )
+        if self._git_repo.amend_commit_message(new_message):
             self._logger.info("=== Commit amended successfully ===")
             ai_percentage = int(round(stats.ai_percentage))
             return InjectResult(True, ai_percentage)
-        except subprocess.CalledProcessError:
+        else:
             self._logger.error("Failed to amend commit")
             return InjectResult(False, message="❌ Failed to amend commit with AI stats")

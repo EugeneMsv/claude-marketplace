@@ -258,7 +258,7 @@ class TestProcessPushFlagIndependence:
         tracking = self._setup(service, git_repo, glab_repo)
         mock_tracking_cls.return_value.load.return_value = tracking
 
-        service.process_push("git push")
+        service.process_push()
 
         req = self._get_update_request(glab_repo)
         assert req.title is not None
@@ -272,7 +272,7 @@ class TestProcessPushFlagIndependence:
         tracking = self._setup(service, git_repo, glab_repo)
         mock_tracking_cls.return_value.load.return_value = tracking
 
-        service.process_push("git push")
+        service.process_push()
 
         req = self._get_update_request(glab_repo)
         assert req.title is None
@@ -287,7 +287,7 @@ class TestProcessPushFlagIndependence:
         tracking = self._setup(service, git_repo, glab_repo)
         mock_tracking_cls.return_value.load.return_value = tracking
 
-        service.process_push("git push")
+        service.process_push()
 
         req = self._get_update_request(glab_repo)
         assert req.description is not None
@@ -300,7 +300,7 @@ class TestProcessPushFlagIndependence:
         tracking = self._setup(service, git_repo, glab_repo)
         mock_tracking_cls.return_value.load.return_value = tracking
 
-        service.process_push("git push")
+        service.process_push()
 
         req = self._get_update_request(glab_repo)
         assert req.description is None
@@ -314,7 +314,7 @@ class TestProcessPushFlagIndependence:
         tracking = self._setup(service, git_repo, glab_repo, existing_labels=[], ai_pct=85.0)
         mock_tracking_cls.return_value.load.return_value = tracking
 
-        service.process_push("git push")
+        service.process_push()
 
         req = self._get_update_request(glab_repo)
         assert req.label_to_add == "AI:85%"
@@ -327,7 +327,7 @@ class TestProcessPushFlagIndependence:
         tracking = self._setup(service, git_repo, glab_repo, existing_labels=["AI:70%"], ai_pct=85.0)
         mock_tracking_cls.return_value.load.return_value = tracking
 
-        service.process_push("git push")
+        service.process_push()
 
         req = self._get_update_request(glab_repo)
         assert req.label_to_remove == "AI:70%"
@@ -341,7 +341,7 @@ class TestProcessPushFlagIndependence:
         mock_tracking_cls.return_value.load.return_value = tracking
 
         # Empty request → update_mr not called
-        service.process_push("git push")
+        service.process_push()
 
         glab_repo.update_mr.assert_not_called()
 
@@ -352,7 +352,7 @@ class TestProcessPushFlagIndependence:
         tracking = self._setup(service, git_repo, glab_repo)
         mock_tracking_cls.return_value.load.return_value = tracking
 
-        service.process_push("git push")
+        service.process_push()
 
         req = self._get_update_request(glab_repo)
         assert req.label_to_add is None
@@ -367,7 +367,7 @@ class TestProcessPushFlagIndependence:
         tracking = self._setup(service, git_repo, glab_repo, existing_labels=[], ai_pct=85.0)
         mock_tracking_cls.return_value.load.return_value = tracking
 
-        service.process_push("git push")
+        service.process_push()
 
         req = self._get_update_request(glab_repo)
         assert req.title is not None
@@ -383,7 +383,7 @@ class TestProcessPushFlagIndependence:
         tracking = self._setup(service, git_repo, glab_repo)
         mock_tracking_cls.return_value.load.return_value = tracking
 
-        service.process_push("git push")
+        service.process_push()
 
         glab_repo.update_mr.assert_not_called()
 
@@ -396,7 +396,7 @@ class TestProcessPushFlagIndependence:
         tracking = self._setup(service, git_repo, glab_repo, existing_labels=["AI:70%"], ai_pct=85.0)
         mock_tracking_cls.return_value.load.return_value = tracking
 
-        service.process_push("git push")
+        service.process_push()
 
         assert glab_repo.update_mr.call_count == 1
 

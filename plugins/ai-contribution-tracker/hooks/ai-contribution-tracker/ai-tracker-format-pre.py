@@ -18,66 +18,45 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from domain.line_hasher import LineHasher
-from infrastructure.configuration import ConfigurationLoader
-from infrastructure.git_repository import GitRepository
-from infrastructure.hook_logger import setup_hook_logger
+from infrastructure.dependency_provider import DependencyProvider
 from infrastructure.hook_output_service import HookOutputService
-from services.format_snapshot_service import FormatSnapshotService
+from infrastructure.hook_runner import run_hook
+from services.bash_command_detector import DetectedCommand
+
+
+def _handle(provider: DependencyProvider, hook_output: HookOutputService) -> None:
+    input_data = json.load(sys.stdin)
+    tool_input = input_data.get('tool_input', {})
+    command = tool_input.get('command', '')
+
+    # Early exit: no command
+    if not command:
+        hook_output.exit_with_success()
+
+    pid = os.getppid()  # Parent process ID (the bash command)
+
+    # Early exit: tracker disabled or format detection disabled
+    config = provider.config()
+    if not config.format_detection_enabled:
+        hook_output.exit_with_success()
+
+    # Early exit: not a configured formatter command
+    detected = provider.bash_command_detector().detect_commands(command)
+    if DetectedCommand.CODE_FORMATTER not in detected:
+        hook_output.exit_with_success()
+
+    snapshot_service = provider.build_format_snapshot_service()
+    snapshot_path = snapshot_service.capture_pre_format(pid)
+
+    if snapshot_path:
+        if config.enable_logging:
+            provider.logger().info(f"Created format snapshot: {snapshot_path}")
+        hook_output.exit_with_success("⏳ Format snapshot captured")
 
 
 def main():
     """Main entry point for format pre-hook."""
-    version = ConfigurationLoader.resolve_plugin_version()
-    hook_output = HookOutputService(version)
-
-    try:
-        # Read input from stdin
-        input_data = json.load(sys.stdin)
-
-        # Extract command
-        tool_input = input_data.get('tool_input', {})
-        command = tool_input.get('command', '')
-
-        if not command:
-            # No command, nothing to do
-            hook_output.exit_with_success()
-
-        # Get PID from environment or use current process
-        pid = os.getppid()  # Parent process ID (the bash command)
-
-        # Load configuration
-        config = ConfigurationLoader.load()
-
-        # Setup logging with hook prefix and traceId
-        log_path = ConfigurationLoader.resolve_log_path(config)
-        logger, trace_id = setup_hook_logger('FORMAT-PRE', log_path, config.enable_logging)
-
-        # Check if tracker is enabled
-        if not config.enabled:
-            hook_output.exit_with_success()
-
-        # Initialize dependencies
-        git_repo = GitRepository()
-        hasher = LineHasher()
-        snapshot_service = FormatSnapshotService(git_repo, config, hasher, logger)
-
-        # Capture pre-format state
-        snapshot_path = snapshot_service.capture_pre_format(command, pid)
-
-        if snapshot_path:
-            if config.enable_logging:
-                logger.info(f"Created format snapshot: {snapshot_path}")
-            hook_output.exit_with_success("⏳ Format snapshot captured")
-
-        # Always allow the command to proceed
-        hook_output.exit_with_success()
-
-    except Exception as e:
-        # Silent failure - never block user operations
-        if '--debug' in sys.argv:
-            print(f"Error in format pre-hook: {e}", file=sys.stderr)
-        hook_output.exit_with_success()
+    run_hook('FORMAT-PRE', _handle)
 
 
 if __name__ == '__main__':
