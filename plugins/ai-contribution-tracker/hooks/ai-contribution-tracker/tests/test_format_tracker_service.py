@@ -307,6 +307,62 @@ class TestProcessFile:
 
         assert not updated
 
+    def test_small_ai_contribution_in_large_file_passes(self, format_tracker, temp_dir, hasher):
+        """Given 1 AI line whose tokens appear in a large file, updates tracking.
+
+        Regression test for Jaccard vs containment: Jaccard would score ~10% on a
+        7-token snapshot vs 65-token file and fail the 80% gate. Containment scores
+        100% because all AI tokens are present, and correctly marks it as updated.
+        """
+        tracking = TrackingData("test-branch")
+
+        # Large file with 20+ lines — the AI contributed only the collect() line
+        ai_line = '        .collect(Collectors.toSet());'
+        large_file_content = (
+            'import java.util.Set;\n'
+            'import java.util.stream.Collectors;\n'
+            '\n'
+            'public class UserService {\n'
+            '\n'
+            '    private final UserRepository repository;\n'
+            '\n'
+            '    public UserService(UserRepository repository) {\n'
+            '        this.repository = repository;\n'
+            '    }\n'
+            '\n'
+            '    public Set<String> getActiveUserEmails() {\n'
+            '        return repository.findAllActive()\n'
+            '                .stream()\n'
+            '                .filter(User::isActive)\n'
+            '                .map(User::getEmail)\n'
+            '                .distinct()\n'
+            f'{ai_line}\n'
+            '    }\n'
+            '}\n'
+        )
+
+        test_file = temp_dir / "UserService.java"
+        test_file.write_text(large_file_content)
+
+        # Snapshot: only the one AI-authored line (same tokens, slightly different indent)
+        old_ai_line = '    .collect(Collectors.toSet());'
+        old_hash = hasher.hash(old_ai_line)
+        hash_to_content = {old_hash: old_ai_line}
+
+        updated = format_tracker._process_file(
+            temp_dir,
+            "UserService.java",
+            hash_to_content,
+            tracking
+        )
+
+        # With containment ratio: all 3 unique tokens from the AI line are present → 100% → passes
+        assert updated
+
+        hashes = tracking.get_ai_hashes_for_file("UserService.java")
+        ai_line_hash = hasher.hash(ai_line)
+        assert ai_line_hash in hashes
+
 
 class TestIntegration:
     """Integration tests for format tracker."""

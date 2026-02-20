@@ -93,7 +93,7 @@ The format attribution system preserves AI contribution tracking through code fo
 **How It Works:**
 1. **Pre-format snapshot**: Captures file content and AI line hashes before formatting
 2. **Token normalization**: Extracts semantic tokens (identifiers, keywords, literals) from each line
-3. **Post-format matching**: Uses token-based similarity to match formatted lines with original lines
+3. **Post-format matching**: Uses token-based containment ratio to match formatted lines with original lines — asks "are all AI snapshot tokens still present in the file?" rather than Jaccard similarity, making the score independent of file size
 4. **Attribution update**: Updates tracking data with new line hashes while preserving AI attribution
 
 **Example:**

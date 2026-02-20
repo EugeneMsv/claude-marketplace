@@ -48,23 +48,28 @@ class TokenNormalizer:
 
     def calculate_token_overlap(self, tokens1: List[str], tokens2: List[str]) -> float:
         """
-        Calculate Jaccard similarity between two token lists.
+        Calculate containment ratio of tokens1 within tokens2.
 
-        Jaccard similarity = |intersection| / |union|
+        Containment ratio = |intersection| / |tokens1|
+
+        Answers: "are all AI snapshot tokens still present in the file?"
+        This is independent of file size, unlike Jaccard similarity, which
+        would be diluted by a large file denominator regardless of whether
+        all AI tokens are present.
 
         Args:
-            tokens1: First list of tokens
-            tokens2: Second list of tokens
+            tokens1: First list of tokens (AI snapshot — the reference set)
+            tokens2: Second list of tokens (current file)
 
         Returns:
-            Float between 0.0 (no overlap) and 1.0 (identical)
+            Float between 0.0 (no overlap) and 1.0 (all tokens1 present in tokens2)
 
         Example:
             >>> normalizer = TokenNormalizer()
             >>> tokens1 = ['a', 'b', 'c']
             >>> tokens2 = ['a', 'b', 'd']
             >>> normalizer.calculate_token_overlap(tokens1, tokens2)
-            0.5  # {a, b} intersection / {a, b, c, d} union = 2/4
+            0.667  # {a, b} intersection / {a, b, c} set1 = 2/3
         """
         if not tokens1 and not tokens2:
             return 1.0  # Both empty = identical
@@ -72,19 +77,12 @@ class TokenNormalizer:
         if not tokens1 or not tokens2:
             return 0.0  # One empty = no overlap
 
-        # Convert to multisets (Counter) to handle duplicates correctly
-        # For code, order doesn't matter for format equivalence,
-        # but token frequency does
         set1 = set(tokens1)
         set2 = set(tokens2)
 
         intersection = len(set1 & set2)
-        union = len(set1 | set2)
 
-        if union == 0:
-            return 0.0
-
-        return intersection / union
+        return intersection / len(set1)
 
     def are_format_equivalent(self, text1: str, text2: str, threshold: float = 0.8) -> bool:
         """
