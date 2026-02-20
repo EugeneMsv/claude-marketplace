@@ -16,68 +16,30 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from infrastructure.configuration import ConfigurationLoader
-from infrastructure.git_repository import GitRepository
-from infrastructure.hook_logger import setup_hook_logger
+from infrastructure.dependency_provider import DependencyProvider
 from infrastructure.hook_output_service import HookOutputService
-from infrastructure.tracking_repository import TrackingRepository
-from services.bash_command_detector import BashCommandDetector, DetectedCommand
+from infrastructure.hook_runner import run_hook
+from services.bash_command_detector import DetectedCommand
+
+
+def _handle(provider: DependencyProvider, hook_output: HookOutputService) -> None:
+    input_data = json.load(sys.stdin)
+    tool_input = input_data.get('tool_input', {})
+    command = tool_input.get('command', '')
+
+    if not command:
+        hook_output.exit_with_success()
+
+    # Early exit: only act on non-amend git commits
+    if DetectedCommand.GIT_COMMIT not in provider.bash_command_detector().detect_commands(command):
+        hook_output.exit_with_success()
+
+    provider.build_inject_service().record_commit_intent()
 
 
 def main():
     """Record commit intent before a git commit command runs."""
-    version = ConfigurationLoader.resolve_plugin_version()
-    hook_output = HookOutputService(version)
-
-    try:
-        input_data = json.load(sys.stdin)
-
-        tool_input = input_data.get('tool_input', {})
-        command = tool_input.get('command', '')
-
-        if not command:
-            hook_output.exit_with_success()
-
-        # Only act on non-amend git commits
-        if DetectedCommand.GIT_COMMIT not in BashCommandDetector.detect_commands(command):
-            hook_output.exit_with_success()
-
-        config = ConfigurationLoader.load()
-        log_path = ConfigurationLoader.resolve_log_path(config)
-        logger, _ = setup_hook_logger('COMMIT-PRE', log_path, config.enable_logging)
-
-        if not config.enabled:
-            hook_output.exit_with_success()
-
-        git_repo = GitRepository()
-        git_root = git_repo.get_root()
-        branch = git_repo.get_current_branch()
-
-        if not git_root or not branch:
-            hook_output.exit_with_success()
-
-        sanitized_branch_name = GitRepository.sanitize_branch_name(branch)
-        tracking_repo = TrackingRepository(git_root, sanitized_branch_name)
-        tracking = tracking_repo.load()
-
-        if not tracking:
-            # No tracking data yet — nothing to recover
-            hook_output.exit_with_success()
-
-        head_hash = git_repo.get_head_commit_hash()
-        if not head_hash:
-            hook_output.exit_with_success()
-
-        tracking.pending_inject_head = head_hash
-        tracking_repo.save(tracking)
-
-        logger.info(f"Commit intent recorded: head_before={head_hash[:8]}")
-
-    except Exception:
-        # Never block the user's command
-        pass
-
-    hook_output.exit_with_success()
+    run_hook('COMMIT-PRE', _handle)
 
 
 if __name__ == '__main__':

@@ -114,3 +114,47 @@ class TestGetHeadCommitMessage:
 
         assert result is not None
         assert "Overall: +" in result
+
+
+class TestAmendCommitMessage:
+
+    @pytest.mark.parametrize("raises,expected", [
+        (None, True),
+        (subprocess.CalledProcessError(1, 'git'), False),
+    ])
+    def test_amend_returns_correct_result(self, repo, raises, expected):
+        """Given git commit --amend succeeds/fails, returns True/False."""
+        side_effect = raises if raises else MagicMock()
+        with patch("infrastructure.git_repository.subprocess.run",
+                   side_effect=raises or None,
+                   return_value=MagicMock()) as mock_run:
+            if raises:
+                with patch("infrastructure.git_repository.subprocess.run",
+                           side_effect=raises):
+                    result = repo.amend_commit_message("new message")
+            else:
+                result = repo.amend_commit_message("new message")
+
+        assert result == expected
+
+    def test_amend_calls_correct_command(self, repo):
+        """amend_commit_message calls git commit --amend -m with the message."""
+        message = "updated commit message"
+        with patch("infrastructure.git_repository.subprocess.run") as mock_run:
+            repo.amend_commit_message(message)
+
+        mock_run.assert_called_once_with(
+            ['git', 'commit', '--amend', '-m', message],
+            check=True,
+            capture_output=True
+        )
+
+    def test_amend_returns_false_on_error(self, repo):
+        """Given git amend fails, returns False without raising."""
+        with patch(
+            "infrastructure.git_repository.subprocess.run",
+            side_effect=subprocess.CalledProcessError(1, 'git')
+        ):
+            result = repo.amend_commit_message("message")
+
+        assert result is False

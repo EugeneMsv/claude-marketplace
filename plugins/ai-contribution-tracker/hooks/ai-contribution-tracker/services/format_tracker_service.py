@@ -46,12 +46,11 @@ class FormatTrackerService:
         self._token_normalizer = token_normalizer
         self._logger = logger
 
-    def process_post_format(self, command: str, pid: int) -> bool:
+    def process_post_format(self, pid: int) -> bool:
         """
         Process formatting completion and update attribution.
 
         Args:
-            command: Bash command that was executed
             pid: Process ID of the command
 
         Returns:
