@@ -1,5 +1,7 @@
 """Centralized lazy service factory for AI contribution tracker hooks."""
 
+from __future__ import annotations
+
 from logging import Logger
 from pathlib import Path
 from typing import Optional
@@ -14,7 +16,7 @@ class DependencyProvider:
     """Centralized, lazy dependency factory for hook entry points.
 
     Created once per hook invocation with the hook's log-prefix name.
-    Config, logger, and git_repo are cached (created on first access).
+    Config, logger, git_repo, and bash_command_detector are cached (created on first access).
     GlabRepository is not cached since it wraps the logger.
 
     Usage:
@@ -35,6 +37,7 @@ class DependencyProvider:
         self._logger: Optional[Logger] = None
         self._trace_id: Optional[str] = None
         self._git_repo: Optional[GitRepository] = None
+        self._detector = None
 
     def config(self) -> Configuration:
         """Return cached Configuration, loading it on first call."""
@@ -67,20 +70,22 @@ class DependencyProvider:
         """Return a new GlabRepository wrapping the current logger (not cached)."""
         return GlabRepository(self.logger())
 
-    def bash_command_detector(self):
-        """Return a BashCommandDetector configured from current config."""
-        from services.bash_command_detector import BashCommandDetector
-        return BashCommandDetector(self.config())
+    def bash_command_detector(self) -> BashCommandDetector:
+        """Return cached BashCommandDetector configured from current config."""
+        if self._detector is None:
+            from services.bash_command_detector import BashCommandDetector
+            self._detector = BashCommandDetector(self.config())
+        return self._detector
 
     # --- Service builders ---
 
-    def build_capture_service(self):
+    def build_capture_service(self) -> CaptureService:
         """Build and return a fully-wired CaptureService."""
         from domain.line_hasher import LineHasher
         from services.capture_service import CaptureService
         return CaptureService(self.git_repo(), self.config(), LineHasher(), self.logger())
 
-    def build_inject_service(self):
+    def build_inject_service(self) -> InjectService:
         """Build and return a fully-wired InjectService."""
         from domain.line_hasher import LineHasher
         from services.stats_calculator import StatsCalculator
@@ -89,25 +94,25 @@ class DependencyProvider:
         stats_calculator = StatsCalculator(hasher)
         return InjectService(self.git_repo(), self.config(), stats_calculator, self.logger())
 
-    def build_mr_service(self):
+    def build_mr_service(self) -> MrService:
         """Build and return a fully-wired MrService."""
         from services.mr_service import MrService
         return MrService(self.git_repo(), self.glab_repo(), self.config(), self.logger())
 
-    def build_format_snapshot_service(self):
+    def build_format_snapshot_service(self) -> FormatSnapshotService:
         """Build and return a fully-wired FormatSnapshotService."""
         from domain.line_hasher import LineHasher
         from services.format_snapshot_service import FormatSnapshotService
         return FormatSnapshotService(self.git_repo(), self.config(), LineHasher(), self.logger())
 
-    def build_format_tracker_service(self):
+    def build_format_tracker_service(self) -> FormatTrackerService:
         """Build and return a fully-wired FormatTrackerService."""
         from domain.line_hasher import LineHasher
         from domain.token_normalizer import TokenNormalizer
         from services.format_tracker_service import FormatTrackerService
         return FormatTrackerService(self.git_repo(), self.config(), LineHasher(), TokenNormalizer(), self.logger())
 
-    def build_housekeeping_service(self):
+    def build_housekeeping_service(self) -> HousekeepingService:
         """Build and return a fully-wired HousekeepingService."""
         from services.housekeeping_service import HousekeepingService
         return HousekeepingService(self.git_repo(), self.config(), self.logger())

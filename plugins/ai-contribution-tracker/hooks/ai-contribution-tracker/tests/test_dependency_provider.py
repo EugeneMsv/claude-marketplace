@@ -129,6 +129,13 @@ class TestServiceBuilders:
         result = provider.bash_command_detector()
         assert isinstance(result, BashCommandDetector)
 
+    def test_bash_command_detector_cached(self):
+        """bash_command_detector() returns the same instance on repeated calls."""
+        provider = self._make_provider()
+        d1 = provider.bash_command_detector()
+        d2 = provider.bash_command_detector()
+        assert d1 is d2
+
     def test_build_capture_service_returns_correct_type(self):
         """build_capture_service() returns a CaptureService."""
         provider = self._make_provider()
