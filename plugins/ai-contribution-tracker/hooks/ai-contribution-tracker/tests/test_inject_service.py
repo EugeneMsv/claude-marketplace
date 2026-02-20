@@ -213,6 +213,57 @@ class TestRecoverMissedCommitSuccess:
         assert loaded.pending_inject_head is None
 
 
+class TestRecordCommitIntent:
+    """Tests for InjectService.record_commit_intent."""
+
+    def test_writes_head_hash_to_tracking(self, service, git_repo, git_root):
+        """Given tracking exists and git head available, sets pending_inject_head."""
+        git_repo.get_root.return_value = git_root
+        git_repo.get_current_branch.return_value = "feature-branch"
+        git_repo.get_head_commit_hash.return_value = "abc123"
+
+        tracking = TrackingData("feature-branch")
+        tracking.files_tracked = ["file.py"]
+        repo = TrackingRepository(git_root, "feature-branch")
+        repo.save(tracking)
+
+        service.record_commit_intent()
+
+        loaded = repo.load()
+        assert loaded.pending_inject_head == "abc123"
+
+    def test_skips_when_no_tracking_file(self, service, git_repo, git_root):
+        """Given no tracking file, returns without error."""
+        git_repo.get_root.return_value = git_root
+        git_repo.get_current_branch.return_value = "feature-branch"
+
+        service.record_commit_intent()  # must not raise
+
+        assert TrackingRepository(git_root, "feature-branch").load() is None
+
+    def test_skips_when_no_git_root(self, service, git_repo):
+        """Given no git root, returns without error."""
+        git_repo.get_root.return_value = None
+
+        service.record_commit_intent()  # must not raise
+
+    def test_skips_when_no_head_hash(self, service, git_repo, git_root):
+        """Given HEAD hash unavailable, leaves pending_inject_head unchanged."""
+        git_repo.get_root.return_value = git_root
+        git_repo.get_current_branch.return_value = "feature-branch"
+        git_repo.get_head_commit_hash.return_value = None
+
+        tracking = TrackingData("feature-branch")
+        tracking.pending_inject_head = "existing"
+        repo = TrackingRepository(git_root, "feature-branch")
+        repo.save(tracking)
+
+        service.record_commit_intent()
+
+        loaded = repo.load()
+        assert loaded.pending_inject_head == "existing"
+
+
 class TestProcessCommitClearsPendingFlag:
     """Tests that normal process_commit also clears pending_inject_head."""
 

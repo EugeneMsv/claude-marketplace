@@ -19,8 +19,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 from infrastructure.configuration import ConfigurationLoader
 from infrastructure.dependency_provider import DependencyProvider
 from infrastructure.hook_output_service import HookOutputService
-from infrastructure.tracking_repository import TrackingRepository
-from infrastructure.git_repository import GitRepository
 from services.bash_command_detector import DetectedCommand
 
 
@@ -45,29 +43,7 @@ def main():
         if not provider.config().enabled:
             hook_output.exit_with_success()
 
-        git_repo = provider.git_repo()
-        git_root = git_repo.get_root()
-        branch = git_repo.get_current_branch()
-
-        if not git_root or not branch:
-            hook_output.exit_with_success()
-
-        sanitized_branch_name = GitRepository.sanitize_branch_name(branch)
-        tracking_repo = TrackingRepository(git_root, sanitized_branch_name)
-        tracking = tracking_repo.load()
-
-        if not tracking:
-            # No tracking data yet — nothing to recover
-            hook_output.exit_with_success()
-
-        head_hash = git_repo.get_head_commit_hash()
-        if not head_hash:
-            hook_output.exit_with_success()
-
-        tracking.pending_inject_head = head_hash
-        tracking_repo.save(tracking)
-
-        provider.logger().info(f"Commit intent recorded: head_before={head_hash[:8]}")
+        provider.build_inject_service().record_commit_intent()
 
     except Exception:
         # Never block the user's command
