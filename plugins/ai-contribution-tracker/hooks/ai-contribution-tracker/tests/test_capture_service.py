@@ -15,6 +15,7 @@ from domain.line_hasher import LineHasher
 from domain.tracking_data import TrackingData
 from infrastructure.tracking_repository import TrackingRepository
 from infrastructure.git_repository import GitRepository
+from infrastructure.write_snapshot_repository import WriteSnapshotRepository
 
 
 class TestDiffLines:
@@ -162,21 +163,69 @@ def _make_service(git_root: Path, branch: str = "feature/test", tracked_ext=".py
 
     hasher = LineHasher()
     logger = logging.getLogger("test")
+    snapshot_repo = WriteSnapshotRepository(git_root)
 
-    return CaptureService(git_repo, config, hasher, logger)
+    return CaptureService(git_repo, config, hasher, logger, snapshot_repo)
+
+
+class TestStorePreWriteSnapshot:
+    """Tests for store_pre_write_snapshot."""
+
+    def test_existing_file_stores_correct_content(self):
+        """Given an existing file, snapshot stores its current content."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            git_root = Path(tmpdir)
+            service = _make_service(git_root)
+
+            target = git_root / "app.py"
+            old_content = "def old():\n    pass\n"
+            target.write_text(old_content, encoding="utf-8")
+
+            service.store_pre_write_snapshot(str(target))
+
+            # Verify snapshot was saved by reading it directly
+            snapshot_repo = WriteSnapshotRepository(git_root)
+            result = snapshot_repo.load_and_delete(str(target))
+            assert result == old_content
+
+    def test_missing_file_stores_empty_string(self):
+        """Given a non-existent file (new file case), snapshot stores ''."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            git_root = Path(tmpdir)
+            service = _make_service(git_root)
+
+            file_path = str(git_root / "new_file.py")
+            service.store_pre_write_snapshot(file_path)
+
+            snapshot_repo = WriteSnapshotRepository(git_root)
+            result = snapshot_repo.load_and_delete(file_path)
+            assert result == ''
+
+    def test_empty_file_path_is_no_op(self):
+        """Given empty file_path, store_pre_write_snapshot does nothing."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            git_root = Path(tmpdir)
+            service = _make_service(git_root)
+
+            service.store_pre_write_snapshot('')  # should not raise
+
+            snapshot_dir = git_root / '.claude' / 'write-snapshots'
+            assert not snapshot_dir.exists()
 
 
 class TestProcessWrite:
     """Tests for process_write."""
 
     def test_write_tracks_content_lines(self):
-        """Given a Write event, each content line is tracked."""
+        """Given a Write event for a new file, content lines are tracked."""
         with tempfile.TemporaryDirectory() as tmpdir:
             git_root = Path(tmpdir)
             (git_root / ".claude").mkdir()
             service = _make_service(git_root)
 
-            tool_input = {"file_path": str(git_root / "app.py"), "content": "line A\nline B\nline C"}
+            file_path = str(git_root / "app.py")
+            # No snapshot saved → new file (load_and_delete returns '')
+            tool_input = {"file_path": file_path, "content": "line A\nline B\nline C"}
             result = service.process_write(tool_input)
 
             assert result is True
@@ -203,13 +252,15 @@ class TestProcessWrite:
             assert result is False
 
     def test_write_new_file_tracks_all_lines_as_added_none_removed(self):
-        """Given a Write to a non-existent file, all lines are AI-added and nothing is AI-removed."""
+        """Given Write to a non-existent file (no snapshot), all lines are AI-added."""
         with tempfile.TemporaryDirectory() as tmpdir:
             git_root = Path(tmpdir)
             (git_root / ".claude").mkdir()
             service = _make_service(git_root)
 
-            tool_input = {"file_path": str(git_root / "app.py"), "content": "def foo():\n    pass\n"}
+            # No snapshot pre-populated → new file
+            file_path = str(git_root / "app.py")
+            tool_input = {"file_path": file_path, "content": "def foo():\n    pass\n"}
             service.process_write(tool_input)
 
             tracking = TrackingRepository(git_root, "feature-test").load()
@@ -217,36 +268,43 @@ class TestProcessWrite:
             assert tracking.ai_removed_line_hashes.get("app.py", {}) == {}
 
     def test_write_overwrites_existing_file_tracks_removed_lines(self):
-        """Given a Write that replaces an existing file, deleted lines are recorded as AI-removed."""
+        """Given a pre-write snapshot with old content, deleted lines are AI-removed."""
         with tempfile.TemporaryDirectory() as tmpdir:
             git_root = Path(tmpdir)
             (git_root / ".claude").mkdir()
             service = _make_service(git_root)
 
-            target = git_root / "app.py"
-            target.write_text("def old_func():\n    return 1\n", encoding="utf-8")
+            file_path = str(git_root / "app.py")
+            old_content = "def old_func():\n    return 1\n"
+            new_content = "def new_func():\n    return 2\n"
 
-            tool_input = {"file_path": str(target), "content": "def new_func():\n    return 2\n"}
+            # Write old content to disk, then snapshot it (simulates PreToolUse)
+            Path(file_path).write_text(old_content, encoding="utf-8")
+            service.store_pre_write_snapshot(file_path)
+
+            # process_write receives the new content (Write tool already ran)
+            tool_input = {"file_path": file_path, "content": new_content}
             service.process_write(tool_input)
 
             tracking = TrackingRepository(git_root, "feature-test").load()
-            # New lines are AI-added
             assert len(tracking.ai_line_hashes.get("app.py", {})) > 0
-            # Old lines are AI-removed
             assert len(tracking.ai_removed_line_hashes.get("app.py", {})) > 0
 
     def test_write_same_content_records_no_adds_no_removals(self):
-        """Given a Write with identical content to what is on disk, nothing is tracked."""
+        """Given identical pre-write snapshot and new content, nothing is tracked."""
         with tempfile.TemporaryDirectory() as tmpdir:
             git_root = Path(tmpdir)
             (git_root / ".claude").mkdir()
             service = _make_service(git_root)
 
             content = "def foo():\n    pass\n"
-            target = git_root / "app.py"
-            target.write_text(content, encoding="utf-8")
+            file_path = str(git_root / "app.py")
+            Path(file_path).write_text(content, encoding="utf-8")
 
-            tool_input = {"file_path": str(target), "content": content}
+            # Snapshot the current content (same as new content)
+            service.store_pre_write_snapshot(file_path)
+
+            tool_input = {"file_path": file_path, "content": content}
             service.process_write(tool_input)
 
             tracking = TrackingRepository(git_root, "feature-test").load()

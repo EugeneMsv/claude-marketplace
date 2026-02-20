@@ -51,14 +51,15 @@ Before using the AI Contribution Tracker, ensure the following requirements are 
 
 ## How It Works
 
-1. **Capture Hook** (PostToolUse Write/Edit): Records hashes of AI-written lines
-2. **Commit Pre Hook** (PreToolUse Bash): Before a `git commit`, records the current HEAD hash into the tracking file as a commit intent marker
-3. **Format Pre Hook** (PreToolUse Bash): Captures file state before formatting commands
-4. **Format Post Hook** (PostToolUse Bash): Updates AI attribution after formatting using token-based matching
-5. **Inject Hook** (PostToolUse Bash): On commit, calculates stats and amends commit message; on `git push`, checks for a pending commit intent and recovers any missed injection
-6. **Housekeeping**: Automatically cleans up stale tracking files during inject hook
-7. **MR Update Hook** (PostToolUse Bash): On push, independently applies any enabled MR features — title tag, description stats, `AI:X%` label, and/or draft MR auto-creation (all opt-in, each flag independent)
-8. **Git Diff Analysis**: Uses `git diff <merge-base> HEAD` to count only branch changes
+1. **Write Pre Hook** (PreToolUse Write): Snapshots existing file content before a Write overwrites it, enabling accurate AI-removed line tracking
+2. **Capture Hook** (PostToolUse Write/Edit): Records AI-added line hashes; for Write operations, reads the pre-write snapshot to also record AI-removed lines
+3. **Commit Pre Hook** (PreToolUse Bash): Before a `git commit`, records the current HEAD hash into the tracking file as a commit intent marker
+4. **Format Pre Hook** (PreToolUse Bash): Captures file state before formatting commands
+5. **Format Post Hook** (PostToolUse Bash): Updates AI attribution after formatting using token-based matching
+6. **Inject Hook** (PostToolUse Bash): On commit, calculates stats and amends commit message; on `git push`, checks for a pending commit intent and recovers any missed injection
+7. **Housekeeping**: Automatically cleans up stale tracking files during inject hook
+8. **MR Update Hook** (PostToolUse Bash): On push, independently applies any enabled MR features — title tag, description stats, `AI:X%` label, and/or draft MR auto-creation (all opt-in, each flag independent)
+9. **Git Diff Analysis**: Uses `git diff <merge-base> HEAD` to count only branch changes
 
 **Format Attribution Preservation**:
 - Automatically detects formatting commands: `spotlessApply`, `prettier`, `black`, `eslint --fix`, `gofmt`, `rustfmt`, `clang-format`
@@ -121,6 +122,10 @@ Hooks are configured in `~/.claude/settings.json`:
 {
   "hooks": {
     "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [{"command": "python3 $HOME/.claude/hooks/ai-contribution-tracker/ai-tracker-write-pre.py"}]
+      },
       {
         "matcher": "Bash",
         "hooks": [{"command": "python3 $HOME/.claude/hooks/ai-contribution-tracker/ai-tracker-format-pre.py"}]
