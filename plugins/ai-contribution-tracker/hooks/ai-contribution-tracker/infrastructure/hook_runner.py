@@ -28,6 +28,8 @@ def run_hook(
     provider = DependencyProvider(hook_name)
 
     try:
+        if not provider.config().enabled:
+            hook_output.exit_with_success()
         handler(provider, hook_output)
     except Exception as e:
         try:

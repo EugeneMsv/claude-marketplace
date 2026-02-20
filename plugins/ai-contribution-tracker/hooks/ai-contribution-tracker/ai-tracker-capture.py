@@ -28,10 +28,6 @@ def _handle(provider: DependencyProvider, hook_output: HookOutputService) -> Non
     if tool_name not in ['Write', 'Edit']:
         hook_output.exit_with_success()
 
-    if not provider.config().enabled:
-        provider.logger().info("AI tracker disabled in config")
-        hook_output.exit_with_success()
-
     service = provider.build_capture_service()
 
     if tool_name == 'Write':

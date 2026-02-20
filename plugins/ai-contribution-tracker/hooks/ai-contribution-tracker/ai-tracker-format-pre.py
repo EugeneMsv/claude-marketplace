@@ -37,7 +37,7 @@ def _handle(provider: DependencyProvider, hook_output: HookOutputService) -> Non
 
     # Early exit: tracker disabled or format detection disabled
     config = provider.config()
-    if not config.enabled or not config.format_detection_enabled:
+    if not config.format_detection_enabled:
         hook_output.exit_with_success()
 
     # Early exit: not a configured formatter command

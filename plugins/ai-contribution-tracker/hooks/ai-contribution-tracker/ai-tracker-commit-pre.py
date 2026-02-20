@@ -34,9 +34,6 @@ def _handle(provider: DependencyProvider, hook_output: HookOutputService) -> Non
     if DetectedCommand.GIT_COMMIT not in provider.bash_command_detector().detect_commands(command):
         hook_output.exit_with_success()
 
-    if not provider.config().enabled:
-        hook_output.exit_with_success()
-
     provider.build_inject_service().record_commit_intent()
 
 

@@ -66,6 +66,33 @@ class TestRunHookNormalPath:
         mock_provider_cls.assert_called_once_with('MY-HOOK')
 
 
+class TestRunHookDisabledConfig:
+
+    @patch("infrastructure.hook_runner.HookOutputService")
+    @patch("infrastructure.hook_runner.DependencyProvider")
+    @patch("infrastructure.hook_runner.ConfigurationLoader")
+    def test_handler_not_called_when_disabled(self, mock_loader, mock_provider_cls, mock_output_cls):
+        """Given config.enabled is False, handler is never called."""
+        mock_loader.resolve_plugin_version.return_value = "0.1"
+        mock_output = MagicMock()
+        mock_output.exit_with_success.side_effect = SystemExit(0)
+        mock_output_cls.return_value = mock_output
+        mock_provider = _make_provider_mock(enable_logging=False)
+        mock_provider.config.return_value.enabled = False
+        mock_provider_cls.return_value = mock_provider
+
+        handler_called = []
+        def handler(provider, hook_output):
+            handler_called.append(True)
+
+        with pytest.raises(SystemExit) as exc:
+            run_hook('TEST', handler)
+
+        assert exc.value.code == 0
+        assert not handler_called
+        mock_output.exit_with_success.assert_called_once_with()
+
+
 class TestRunHookExceptionHandling:
 
     @patch("infrastructure.hook_runner.HookOutputService")

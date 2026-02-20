@@ -27,9 +27,6 @@ def _handle(provider: DependencyProvider, hook_output: HookOutputService) -> Non
     json.load(sys.stdin)  # consume stdin (unused)
     pid = os.getppid()  # Parent process ID (the bash command)
 
-    if not provider.config().enabled:
-        hook_output.exit_with_success()
-
     success = provider.build_format_tracker_service().process_post_format(pid)
 
     if success:
