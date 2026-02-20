@@ -194,6 +194,25 @@ class GitRepository:
         except (subprocess.CalledProcessError, FileNotFoundError):
             return None
 
+    def amend_commit_message(self, message: str) -> bool:
+        """Amend the current HEAD commit with a new message.
+
+        Args:
+            message: New commit message to apply
+
+        Returns:
+            True if the amend succeeded, False otherwise
+        """
+        try:
+            subprocess.run(
+                ['git', 'commit', '--amend', '-m', message],
+                check=True,
+                capture_output=True
+            )
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
     @staticmethod
     def sanitize_branch_name(branch: str) -> str:
         """Sanitize branch name for use in filenames.

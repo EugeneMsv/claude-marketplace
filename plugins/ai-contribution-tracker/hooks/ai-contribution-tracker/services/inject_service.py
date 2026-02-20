@@ -1,6 +1,5 @@
 """Inject service for AI contribution tracking."""
 
-import subprocess
 from datetime import datetime
 from logging import Logger
 from typing import Optional
@@ -188,15 +187,10 @@ class InjectService:
 
         self._logger.info("New message with stats appended")
 
-        try:
-            subprocess.run(
-                ['git', 'commit', '--amend', '-m', new_message],
-                check=True,
-                capture_output=True
-            )
+        if self._git_repo.amend_commit_message(new_message):
             self._logger.info("=== Commit amended successfully ===")
             ai_percentage = int(round(stats.ai_percentage))
             return InjectResult(True, ai_percentage)
-        except subprocess.CalledProcessError:
+        else:
             self._logger.error("Failed to amend commit")
             return InjectResult(False, message="❌ Failed to amend commit with AI stats")

@@ -2,7 +2,6 @@
 
 import logging
 import sys
-import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -185,9 +184,9 @@ class TestRecoverMissedCommitSuccess:
         repo = TrackingRepository(git_root, "feature-branch")
         repo.save(tracking)
 
-        with patch("services.inject_service.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            result = service.recover_missed_commit()
+        git_repo.amend_commit_message.return_value = True
+
+        result = service.recover_missed_commit()
 
         assert result.success
         assert result.ai_percentage == 80
@@ -205,8 +204,9 @@ class TestRecoverMissedCommitSuccess:
         repo = TrackingRepository(git_root, "feature-branch")
         repo.save(tracking)
 
-        with patch("services.inject_service.subprocess.run", side_effect=subprocess.CalledProcessError(1, 'git')):
-            result = service.recover_missed_commit()
+        git_repo.amend_commit_message.return_value = False
+
+        result = service.recover_missed_commit()
 
         assert not result.success
         loaded = repo.load()
@@ -227,9 +227,9 @@ class TestProcessCommitClearsPendingFlag:
         repo = TrackingRepository(git_root, "feature-branch")
         repo.save(tracking)
 
-        with patch("services.inject_service.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            result = service.process_commit()
+        git_repo.amend_commit_message.return_value = True
+
+        result = service.process_commit()
 
         assert result.success
         loaded = repo.load()
