@@ -20,7 +20,7 @@ from infrastructure.git_repository import GitRepository
 from infrastructure.hook_logger import setup_hook_logger
 from infrastructure.hook_output_service import HookOutputService
 from domain.line_hasher import LineHasher
-from services.bash_command_detector import BashCommandDetector
+from services.bash_command_detector import BashCommandDetector, DetectedCommand
 from services.stats_calculator import StatsCalculator
 from services.inject_service import InjectService
 
@@ -55,10 +55,11 @@ def main():
         service = InjectService(git_repo, config, stats_calculator, logger)
 
         # Normal path: inject when this command is a non-amend git commit
-        if BashCommandDetector.is_git_commit(command) and not BashCommandDetector.is_git_commit_amend(command):
+        detected = BashCommandDetector.detect_commands(command)
+        if DetectedCommand.GIT_COMMIT in detected:
             logger.info("Git commit command detected")
             result = service.process_commit()
-        elif BashCommandDetector.is_git_push(command):
+        elif DetectedCommand.GIT_PUSH in detected:
             # Recovery path: a push after a failed chained commit may have a missed inject
             result = service.recover_missed_commit()
         else:

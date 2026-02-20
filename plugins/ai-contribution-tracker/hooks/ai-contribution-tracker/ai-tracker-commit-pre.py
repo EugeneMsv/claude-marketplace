@@ -21,7 +21,7 @@ from infrastructure.git_repository import GitRepository
 from infrastructure.hook_logger import setup_hook_logger
 from infrastructure.hook_output_service import HookOutputService
 from infrastructure.tracking_repository import TrackingRepository
-from services.bash_command_detector import BashCommandDetector
+from services.bash_command_detector import BashCommandDetector, DetectedCommand
 
 
 def main():
@@ -39,7 +39,7 @@ def main():
             hook_output.exit_with_success()
 
         # Only act on non-amend git commits
-        if not BashCommandDetector.is_git_commit(command) or BashCommandDetector.is_git_commit_amend(command):
+        if DetectedCommand.GIT_COMMIT not in BashCommandDetector.detect_commands(command):
             hook_output.exit_with_success()
 
         config = ConfigurationLoader.load()
