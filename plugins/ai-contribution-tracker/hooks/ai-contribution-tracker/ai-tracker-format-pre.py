@@ -7,7 +7,7 @@ state of tracked files so they can be compared with post-format state to
 preserve AI attribution through formatting changes.
 
 Hook Event: PreToolUse Bash
-Matcher: spotlessApply|prettier|black|eslint.*--fix|gofmt|rustfmt|clang-format
+Matcher: spotlessApply|prettier|ruff|eslint.*--fix|gofmt|rustfmt|clang-format
 """
 
 import json

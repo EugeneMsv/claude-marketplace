@@ -104,7 +104,7 @@ class DependencyProvider:
         from services.stats_calculator import StatsCalculator
         from services.inject_service import InjectService
         hasher = LineHasher()
-        stats_calculator = StatsCalculator(hasher)
+        stats_calculator = StatsCalculator(hasher, self.config().tracked_extensions)
         return InjectService(self.git_repo(), self.config(), stats_calculator, self.logger())
 
     def build_mr_service(self) -> MrService:

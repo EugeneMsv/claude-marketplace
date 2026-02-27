@@ -1,7 +1,7 @@
 """Statistics calculation service."""
 
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Set
 from domain.tracking_data import TrackingData
 from domain.diff import Diff
 from domain.contribution_stats import ContributionStats, FileTypeStats, LineStats, ContributorStats
@@ -14,13 +14,15 @@ class StatsCalculator:
     Pure calculation logic with no I/O dependencies.
     """
 
-    def __init__(self, hasher: LineHasher):
+    def __init__(self, hasher: LineHasher, tracked_extensions: Set[str]):
         """Initialize stats calculator.
 
         Args:
             hasher: LineHasher instance for consistent hashing
+            tracked_extensions: Set of file extensions to include in stats (e.g. {'.py', '.java'})
         """
         self._hasher = hasher
+        self._tracked_extensions = tracked_extensions
 
     def calculate(self, tracking: TrackingData, diff: Diff) -> ContributionStats:
         """Calculate contribution statistics.
@@ -38,7 +40,7 @@ class StatsCalculator:
         total_removed = 0
         by_file_type: Dict[str, Dict] = {}
 
-        # Process each tracked file
+        # Process each AI-tracked file (files where Write/Edit tool calls fired)
         for file_path in tracking.files_tracked:
             # Get diff for this file
             file_diff = diff.get_file_diff(file_path)
@@ -73,13 +75,39 @@ class StatsCalculator:
                     'ai_removed': 0,
                     'total_added': 0,
                     'total_removed': 0,
-                    'file_count': 0
                 }
 
             by_file_type[ext]['ai_added'] += ai_added_count
             by_file_type[ext]['ai_removed'] += ai_removed_count
             by_file_type[ext]['total_added'] += total_added_count
             by_file_type[ext]['total_removed'] += total_removed_count
+
+        # Process human-only files: changed in the diff but never touched by AI tools.
+        # file_diff.added_lines / removed_lines are the `+`/`-` hunk lines from
+        # `git diff --unified=0 <merge-base> HEAD` — only changed lines, not the full file.
+        # tracking has no AI hashes for these files, so _count_file_lines returns (0, total),
+        # attributing every non-blank changed line to human.
+        tracked_files_set = set(tracking.files_tracked)
+        for file_path in diff.get_changed_files():
+            if file_path in tracked_files_set:
+                continue
+            if Path(file_path).suffix.lower() not in self._tracked_extensions:
+                continue
+            file_diff = diff.get_file_diff(file_path)
+            _, added_count = self._count_file_lines(file_path, file_diff.added_lines, tracking)
+            _, removed_count = self._count_removed_lines(file_path, file_diff.removed_lines, tracking)
+            total_added += added_count
+            total_removed += removed_count
+            ext = Path(file_path).suffix.lower()
+            if ext not in by_file_type:
+                by_file_type[ext] = {
+                    'ai_added': 0,
+                    'ai_removed': 0,
+                    'total_added': 0,
+                    'total_removed': 0,
+                }
+            by_file_type[ext]['total_added'] += added_count
+            by_file_type[ext]['total_removed'] += removed_count
 
         # Build overall ContributorStats
         ai_total = total_ai_added + total_ai_removed
@@ -121,9 +149,9 @@ class StatsCalculator:
         # Calculate file type stats (for backward compatibility, keep FileTypeStats)
         file_type_stats = {}
         for ext, stats_dict in by_file_type.items():
-            # Count files with this extension
+            # Count all changed files with this extension (AI-tracked + human-only)
             file_count = len([
-                f for f in tracking.files_tracked
+                f for f in diff.get_changed_files()
                 if Path(f).suffix.lower() == ext
             ])
 

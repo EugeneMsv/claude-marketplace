@@ -44,6 +44,20 @@ class TestDetectCommands:
         # Amend + push (chained)
         ("git commit --amend && git push",              {DetectedCommand.GIT_COMMIT_AMEND, DetectedCommand.GIT_PUSH}),
         ("git commit --amend --no-edit && git push",    {DetectedCommand.GIT_COMMIT_AMEND, DetectedCommand.GIT_PUSH}),
+        # -C flag (run from a different working directory)
+        ("git -C /path/to/repo commit -m 'msg'",               {DetectedCommand.GIT_COMMIT}),
+        ("git -C /path/to/repo commit --amend",                {DetectedCommand.GIT_COMMIT_AMEND}),
+        ("git -C /path/to/repo push",                          {DetectedCommand.GIT_PUSH}),
+        ("git -C /path/to/repo push --tags",                   {DetectedCommand.GIT_PUSH_TAGS}),
+        # --no-pager flag (common in this project's tooling)
+        ("git --no-pager commit -m 'msg'",                     {DetectedCommand.GIT_COMMIT}),
+        ("git --no-pager push",                                {DetectedCommand.GIT_PUSH}),
+        # -c config override
+        ("git -c user.name=CI commit -m 'msg'",                {DetectedCommand.GIT_COMMIT}),
+        # Chained with -C (the exact pattern that triggered this bug)
+        ("git -C /repo add . && git -C /repo commit -m 'msg'", {DetectedCommand.GIT_COMMIT}),
+        ("git -C /repo add . && git -C /repo commit -m 'msg' && git -C /repo push",
+                                                               {DetectedCommand.GIT_COMMIT, DetectedCommand.GIT_PUSH}),
         # Unidentified
         ("git status",                                  {DetectedCommand.UNIDENTIFIED}),
         ("git add .",                                   {DetectedCommand.UNIDENTIFIED}),
@@ -100,15 +114,15 @@ class TestCodeFormatterDetection:
         # Matches configured formatter
         ("./gradlew spotlessApply", ["spotlessApply"], True),
         ("prettier --write src/", ["prettier"], True),
-        ("black .", ["black"], True),
+        ("ruff format .", ["ruff"], True),
         # Chained with git
         ("./gradlew spotlessApply && git add . && git commit -m 'fmt'", ["spotlessApply"], True),
         # Does not match unconfigured formatter
-        ("black .", ["spotlessApply"], False),
-        ("prettier src/", ["black"], False),
+        ("ruff format .", ["spotlessApply"], False),
+        ("prettier src/", ["ruff"], False),
         # No format_commands configured → never matches
         ("spotlessApply", [], False),
-        ("black .", [], False),
+        ("ruff format .", [], False),
         # Word boundary prevents partial matches
         ("grep better_spotlessApply file.txt", ["spotlessApply"], False),
     ])
@@ -128,6 +142,6 @@ class TestCodeFormatterDetection:
     def test_no_format_commands_never_returns_code_formatter(self):
         """When format_commands is empty, CODE_FORMATTER is never in result."""
         detector = _make_detector([])
-        for cmd in ["spotlessApply", "prettier src/", "black .", "git push"]:
+        for cmd in ["spotlessApply", "prettier src/", "ruff format .", "git push"]:
             result = detector.detect_commands(cmd)
             assert DetectedCommand.CODE_FORMATTER not in result, f"Unexpected CODE_FORMATTER for: {cmd!r}"

@@ -69,7 +69,7 @@ class TestCaptureToStats:
         """Given Edit with duplicate lines, full pipeline tracks and calculates correctly."""
         # Setup
         capture_service = CaptureService(git_repo, config, hasher, logger, WriteSnapshotRepository(temp_dir))
-        stats_calculator = StatsCalculator(hasher)
+        stats_calculator = StatsCalculator(hasher, config.tracked_extensions)
 
         # Create test file
         test_file = temp_dir / "test.py"
@@ -134,7 +134,7 @@ class TestCaptureToStats:
         self, temp_dir, hasher, git_repo, config, logger
     ):
         """Given duplicate lines with partial tracking, stats calculated correctly."""
-        stats_calculator = StatsCalculator(hasher)
+        stats_calculator = StatsCalculator(hasher, config.tracked_extensions)
 
         # Tracking data: track only 2 occurrences of "line A"
         tracking = TrackingData("test-branch")
@@ -170,6 +170,7 @@ class TestMigration:
         self, temp_dir, hasher
     ):
         """Given old format tracking file, loads, migrates, and calculates stats."""
+        tracked_extensions = {'.py', '.js'}
         # Create old format tracking file
         line_a_hash = hasher.hash("line A")
         line_b_hash = hasher.hash("line B")
@@ -205,7 +206,7 @@ class TestMigration:
         assert ai_hashes[line_b_hash] == 1
 
         # Calculate stats
-        stats_calculator = StatsCalculator(hasher)
+        stats_calculator = StatsCalculator(hasher, tracked_extensions)
         diff = Diff(
             merge_base="commit123",
             files={
@@ -275,7 +276,7 @@ class TestEndToEnd:
         """Test complete workflow: Write → Capture → Storage → Stats."""
         # Create services
         capture_service = CaptureService(git_repo, config, hasher, logger, WriteSnapshotRepository(temp_dir))
-        stats_calculator = StatsCalculator(hasher)
+        stats_calculator = StatsCalculator(hasher, config.tracked_extensions)
         tracking_repo = TrackingRepository(temp_dir, "test-branch")
 
         # Create test file

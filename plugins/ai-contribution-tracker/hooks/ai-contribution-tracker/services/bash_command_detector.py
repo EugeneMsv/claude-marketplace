@@ -4,8 +4,16 @@ import re
 from enum import Enum
 from typing import Callable
 
-_COMMIT_PATTERN = re.compile(r'\bgit\s+commit\b')
-_PUSH_PATTERN = re.compile(r'\bgit\s+push\b')
+# Matches a single git global option that can appear before the subcommand:
+#   --long-flag or --long-flag=value  (e.g. --no-pager, --git-dir=/path)
+#   -C /path or -c key=val            (short flags that always take a value)
+#   -X                                (short boolean flag, e.g. -p, -P)
+# Subcommands (commit, push, …) never start with '-', so this pattern
+# safely stops before consuming them.
+_GIT_GLOBAL_OPT = r'(?:--[\w][\w-]*(?:=\S+)?|-[Cc]\s+\S+|-[a-zA-Z])'
+_GIT_GLOBAL_FLAGS = rf'(?:\s+{_GIT_GLOBAL_OPT})*'
+_COMMIT_PATTERN = re.compile(rf'\bgit{_GIT_GLOBAL_FLAGS}\s+commit\b')
+_PUSH_PATTERN   = re.compile(rf'\bgit{_GIT_GLOBAL_FLAGS}\s+push\b')
 
 
 class DetectedCommand(Enum):

@@ -196,7 +196,7 @@ class ConfigurationLoader:
             'commands': [
                 'spotlessApply',
                 'prettier',
-                'black',
+                'ruff',
                 'eslint.*--fix',
                 'gofmt',
                 'rustfmt',

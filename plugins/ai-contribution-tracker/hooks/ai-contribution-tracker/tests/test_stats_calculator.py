@@ -19,7 +19,7 @@ def hasher():
 
 @pytest.fixture
 def calculator(hasher):
-    return StatsCalculator(hasher)
+    return StatsCalculator(hasher, {'.py', '.java', '.kt', '.js', '.ts'})
 
 
 @pytest.fixture
@@ -305,3 +305,62 @@ class TestCalculate:
         assert ".js" in stats.by_file_type
         assert stats.by_file_type[".py"].ai_lines == 1
         assert stats.by_file_type[".js"].ai_lines == 1
+
+
+class TestCalculateHumanOnlyFiles:
+    """Tests for files changed in the diff but never touched by AI tools."""
+
+    def test_manually_edited_file_counted_as_human(self, hasher, tracking):
+        """Given a file absent from files_tracked with a tracked extension,
+        all changed lines from the diff are attributed to human."""
+        calculator = StatsCalculator(hasher, {'.py'})
+        diff = Diff("abc123", {
+            "src/service.py": DiffFile("src/service.py", ["def foo():", "    return 42"], [])
+        })
+
+        stats = calculator.calculate(tracking, diff)
+
+        assert stats.human_stats.added.lines == 2
+        assert stats.ai_stats.added.lines == 0
+
+    def test_mixed_ai_tracked_and_human_only_files(self, hasher, tracking):
+        """Given one AI-tracked file and one human-only file,
+        stats correctly split attribution across both."""
+        calculator = StatsCalculator(hasher, {'.py'})
+        ai_line = "def ai_func(): pass"
+        tracking.add_ai_lines("src/ai.py", [ai_line], hasher)
+        tracking.track_file("src/ai.py")
+
+        diff = Diff("abc123", {
+            "src/ai.py": DiffFile("src/ai.py", [ai_line], []),
+            "src/human.py": DiffFile("src/human.py", ["def human_func(): pass", "    return 1"], []),
+        })
+
+        stats = calculator.calculate(tracking, diff)
+
+        assert stats.ai_stats.added.lines == 1
+        assert stats.human_stats.added.lines == 2
+
+    def test_untracked_extension_excluded(self, hasher, tracking):
+        """Files with extensions not in tracked_extensions are excluded entirely."""
+        calculator = StatsCalculator(hasher, {'.py'})
+        diff = Diff("abc123", {
+            "README.md": DiffFile("README.md", ["# Title", "some text"], [])
+        })
+
+        stats = calculator.calculate(tracking, diff)
+
+        assert stats.human_stats.added.lines == 0
+        assert stats.ai_stats.added.lines == 0
+
+    def test_human_only_file_removals_counted(self, hasher, tracking):
+        """Given a human-only file with removed lines, removals are attributed to human."""
+        calculator = StatsCalculator(hasher, {'.py'})
+        diff = Diff("abc123", {
+            "src/old.py": DiffFile("src/old.py", [], ["def old_func(): pass", "    pass"])
+        })
+
+        stats = calculator.calculate(tracking, diff)
+
+        assert stats.human_stats.removed.lines == 2
+        assert stats.ai_stats.removed.lines == 0

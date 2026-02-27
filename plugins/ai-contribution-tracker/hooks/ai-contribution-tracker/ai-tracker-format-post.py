@@ -7,7 +7,7 @@ snapshot, compares with current state using token matching, and updates
 tracking data to preserve AI attribution through formatting changes.
 
 Hook Event: PostToolUse Bash
-Matcher: spotlessApply|prettier|black|eslint.*--fix|gofmt|rustfmt|clang-format
+Matcher: spotlessApply|prettier|ruff|eslint.*--fix|gofmt|rustfmt|clang-format
 """
 
 import json
