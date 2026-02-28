@@ -45,12 +45,12 @@ def test_cleanup_deletes_stale_files_for_deleted_branches():
     # Given
     with tempfile.TemporaryDirectory() as tmpdir:
         repo_root = Path(tmpdir)
-        claude_dir = repo_root / '.claude'
-        claude_dir.mkdir()
+        herald_dir = repo_root / '.claude' / 'herald'
+        herald_dir.mkdir(parents=True)
 
         # Create stale tracking file (10 days old)
         stale_date = datetime.now() - timedelta(days=10)
-        tracking_file = claude_dir / 'ai-tracking-old-branch.json'
+        tracking_file = herald_dir / 'old-branch.json'
         tracking_data = {
             'branch': 'old-branch',
             'last_updated': stale_date.isoformat(),
@@ -90,12 +90,12 @@ def test_cleanup_keeps_files_for_existing_branches():
     # Given
     with tempfile.TemporaryDirectory() as tmpdir:
         repo_root = Path(tmpdir)
-        claude_dir = repo_root / '.claude'
-        claude_dir.mkdir()
+        herald_dir = repo_root / '.claude' / 'herald'
+        herald_dir.mkdir(parents=True)
 
         # Create tracking file for existing branch
         stale_date = datetime.now() - timedelta(days=10)
-        tracking_file = claude_dir / 'ai-tracking-active-branch.json'
+        tracking_file = herald_dir / 'active-branch.json'
         tracking_data = {
             'branch': 'active-branch',
             'last_updated': stale_date.isoformat(),
@@ -135,12 +135,12 @@ def test_cleanup_excludes_current_branch():
     # Given
     with tempfile.TemporaryDirectory() as tmpdir:
         repo_root = Path(tmpdir)
-        claude_dir = repo_root / '.claude'
-        claude_dir.mkdir()
+        herald_dir = repo_root / '.claude' / 'herald'
+        herald_dir.mkdir(parents=True)
 
         # Create tracking file for current branch
         stale_date = datetime.now() - timedelta(days=10)
-        tracking_file = claude_dir / 'ai-tracking-main.json'
+        tracking_file = herald_dir / 'main.json'
         tracking_data = {
             'branch': 'main',
             'last_updated': stale_date.isoformat(),
@@ -180,14 +180,14 @@ def test_cleanup_respects_max_files_limit():
     # Given
     with tempfile.TemporaryDirectory() as tmpdir:
         repo_root = Path(tmpdir)
-        claude_dir = repo_root / '.claude'
-        claude_dir.mkdir()
+        herald_dir = repo_root / '.claude' / 'herald'
+        herald_dir.mkdir(parents=True)
 
         # Create 10 stale tracking files with different ages
         for i in range(10):
             days_old = 10 + i
             file_date = datetime.now() - timedelta(days=days_old)
-            tracking_file = claude_dir / f'ai-tracking-branch-{i}.json'
+            tracking_file = herald_dir / f'branch-{i}.json'
             tracking_data = {
                 'branch': f'branch-{i}',
                 'last_updated': file_date.isoformat(),
@@ -226,11 +226,11 @@ def test_cleanup_handles_corrupted_json():
     # Given
     with tempfile.TemporaryDirectory() as tmpdir:
         repo_root = Path(tmpdir)
-        claude_dir = repo_root / '.claude'
-        claude_dir.mkdir()
+        herald_dir = repo_root / '.claude' / 'herald'
+        herald_dir.mkdir(parents=True)
 
         # Create corrupted file
-        corrupted_file = claude_dir / 'ai-tracking-corrupted.json'
+        corrupted_file = herald_dir / 'corrupted.json'
         corrupted_file.write_text('{ invalid json')
 
         # Setup mocks
@@ -264,11 +264,11 @@ def test_cleanup_uses_file_mtime_when_last_updated_missing():
     # Given
     with tempfile.TemporaryDirectory() as tmpdir:
         repo_root = Path(tmpdir)
-        claude_dir = repo_root / '.claude'
-        claude_dir.mkdir()
+        herald_dir = repo_root / '.claude' / 'herald'
+        herald_dir.mkdir(parents=True)
 
         # Create tracking file without last_updated
-        tracking_file = claude_dir / 'ai-tracking-no-timestamp.json'
+        tracking_file = herald_dir / 'no-timestamp.json'
         tracking_data = {
             'branch': 'no-timestamp',
             'files_tracked': []
@@ -307,12 +307,12 @@ def test_cleanup_handles_permission_errors():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         repo_root = Path(tmpdir)
-        claude_dir = repo_root / '.claude'
-        claude_dir.mkdir()
+        herald_dir = repo_root / '.claude' / 'herald'
+        herald_dir.mkdir(parents=True)
 
         # Create stale tracking file
         stale_date = datetime.now() - timedelta(days=10)
-        tracking_file = claude_dir / 'ai-tracking-readonly.json'
+        tracking_file = herald_dir / 'readonly.json'
         tracking_data = {
             'branch': 'readonly',
             'last_updated': stale_date.isoformat(),
@@ -336,7 +336,7 @@ def test_cleanup_handles_permission_errors():
         # Mock Path.unlink to raise OSError (permission denied)
         original_unlink = Path.unlink
         def mock_unlink(self):
-            if self.name == 'ai-tracking-readonly.json':
+            if self.name == 'readonly.json':
                 raise OSError("Permission denied")
             return original_unlink(self)
 
@@ -360,12 +360,12 @@ def test_cleanup_respects_stale_threshold():
     # Given
     with tempfile.TemporaryDirectory() as tmpdir:
         repo_root = Path(tmpdir)
-        claude_dir = repo_root / '.claude'
-        claude_dir.mkdir()
+        herald_dir = repo_root / '.claude' / 'herald'
+        herald_dir.mkdir(parents=True)
 
         # Create recent tracking file (5 days old, threshold is 7)
         recent_date = datetime.now() - timedelta(days=5)
-        tracking_file = claude_dir / 'ai-tracking-recent.json'
+        tracking_file = herald_dir / 'recent.json'
         tracking_data = {
             'branch': 'recent',
             'last_updated': recent_date.isoformat(),
@@ -405,15 +405,15 @@ def test_cleanup_sorts_by_oldest_first():
     # Given
     with tempfile.TemporaryDirectory() as tmpdir:
         repo_root = Path(tmpdir)
-        claude_dir = repo_root / '.claude'
-        claude_dir.mkdir()
+        herald_dir = repo_root / '.claude' / 'herald'
+        herald_dir.mkdir(parents=True)
 
         # Create files with different ages (oldest = 20 days, newest = 10 days)
         files_created = []
         for i in range(3):
             days_old = 20 - (i * 5)  # 20, 15, 10
             file_date = datetime.now() - timedelta(days=days_old)
-            tracking_file = claude_dir / f'ai-tracking-branch-{i}.json'
+            tracking_file = herald_dir / f'branch-{i}.json'
             tracking_data = {
                 'branch': f'branch-{i}',
                 'last_updated': file_date.isoformat(),

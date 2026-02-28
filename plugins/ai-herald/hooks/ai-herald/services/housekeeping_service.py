@@ -75,11 +75,11 @@ class HousekeepingService:
             return HousekeepingResult(files_deleted, files_skipped, files_errored)
 
         # Find all tracking files
-        claude_dir = git_root / '.claude'
-        if not claude_dir.exists():
+        herald_dir = git_root / '.claude' / 'herald'
+        if not herald_dir.exists():
             return HousekeepingResult(files_deleted, files_skipped, files_errored)
 
-        tracking_files = list(claude_dir.glob('ai-tracking-*.json'))
+        tracking_files = list(herald_dir.glob('*.json'))
         if not tracking_files:
             return HousekeepingResult(files_deleted, files_skipped, files_errored)
 
@@ -142,10 +142,10 @@ class HousekeepingService:
             try:
                 # Extract branch name from filename
                 filename = file_path.name
-                if not filename.startswith('ai-tracking-') or not filename.endswith('.json'):
+                if not filename.endswith('.json'):
                     continue
 
-                sanitized_branch = filename[len('ai-tracking-'):-len('.json')]
+                sanitized_branch = filename[:-len('.json')]
                 # Reverse sanitization: - back to /
                 # Note: This is a simple heuristic and may not be perfect for all cases
                 branch = sanitized_branch.replace('-', '/')

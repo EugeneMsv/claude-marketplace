@@ -1,4 +1,4 @@
-"""Tests for ai-tracker-inject.py routing logic."""
+"""Tests for herald-stats-injector.py routing logic."""
 
 import importlib.util
 import json
@@ -59,8 +59,8 @@ def _run_main(command: str, enabled: bool = True):
          patch("infrastructure.hook_runner.DependencyProvider", return_value=mock_provider):
         try:
             spec = importlib.util.spec_from_file_location(
-                "ai_tracker_inject",
-                HOOK_DIR / "ai-tracker-inject.py"
+                "herald_stats_injector",
+                HOOK_DIR / "herald-stats-injector.py"
             )
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
@@ -72,7 +72,7 @@ def _run_main(command: str, enabled: bool = True):
 
 
 class TestInjectHookRouting:
-    """Tests for command routing in ai-tracker-inject.py."""
+    """Tests for command routing in herald-stats-injector.py."""
 
     def test_calls_process_commit_for_git_commit(self):
         """Given a git commit command, calls process_commit()."""

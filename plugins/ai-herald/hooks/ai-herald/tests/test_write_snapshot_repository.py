@@ -80,10 +80,10 @@ class TestDirectoryCreation:
     """Tests for automatic directory creation."""
 
     def test_save_creates_snapshots_directory(self):
-        """save() creates .claude/write-snapshots/ if it does not exist."""
+        """save() creates .claude/herald/snapshots/ if it does not exist."""
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = WriteSnapshotRepository(Path(tmpdir))
-            snapshot_dir = Path(tmpdir) / '.claude' / 'write-snapshots'
+            snapshot_dir = Path(tmpdir) / '.claude' / 'herald' / 'snapshots'
 
             assert not snapshot_dir.exists()
             repo.save('/project/app.py', 'content')

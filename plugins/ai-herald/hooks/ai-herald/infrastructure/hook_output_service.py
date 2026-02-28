@@ -18,7 +18,7 @@ class HookOutputService:
         Args:
             version: Plugin version string (e.g., "0.0.14" or "dev")
         """
-        self._prefix = f"[ai-tracker:{version}]"
+        self._prefix = f"[ai-herald:{version}]"
 
     def exit_with_success(self, message: Optional[str] = None):
         """Output success message and exit with code 0.

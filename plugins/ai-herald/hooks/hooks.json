@@ -1,5 +1,5 @@
 {
-  "description": "AI Contribution Tracker - Automatically tracks AI vs human contributions and injects stats into git commits",
+  "description": "AI Herald - Watches every write, announces AI attribution stats at commit time",
   "hooks": {
     "PreToolUse": [
       {
@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-contribution-tracker/ai-tracker-write-pre.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-herald/herald-pre-writer.py",
             "timeout": 10
           }
         ]
@@ -17,12 +17,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-contribution-tracker/ai-tracker-format-pre.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-herald/herald-pre-formatter.py",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-contribution-tracker/ai-tracker-commit-pre.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-herald/herald-pre-committer.py",
             "timeout": 10
           }
         ]
@@ -34,7 +34,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-contribution-tracker/ai-tracker-capture.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-herald/herald-change-captor.py",
             "timeout": 10
           }
         ]
@@ -44,17 +44,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-contribution-tracker/ai-tracker-inject.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-herald/herald-stats-injector.py",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-contribution-tracker/ai-tracker-mr-update.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-herald/herald-mr-injector.py",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-contribution-tracker/ai-tracker-format-post.py",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-herald/herald-post-formatter.py",
             "timeout": 10
           }
         ]

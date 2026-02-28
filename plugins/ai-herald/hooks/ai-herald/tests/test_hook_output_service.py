@@ -22,7 +22,7 @@ class TestExitWithSuccess:
 
         assert exc_info.value.code == 0
         data = json.loads(mock_stdout.getvalue())
-        assert data["systemMessage"] == "[ai-tracker:1.0.0] Test success message"
+        assert data["systemMessage"] == "[ai-herald:1.0.0] Test success message"
 
     def test_without_message_exits_cleanly(self):
         """Given no message, exits with code 0 and no output."""
@@ -49,7 +49,7 @@ class TestExitWithFailure:
 
         assert exc_info.value.code == 1
         data = json.loads(mock_stdout.getvalue())
-        assert data["systemMessage"] == "[ai-tracker:2.0.0] Test failure message"
+        assert data["systemMessage"] == "[ai-herald:2.0.0] Test failure message"
 
     def test_without_message_exits_cleanly(self):
         """Given no message, exits with code 1 and no output."""
@@ -75,7 +75,7 @@ class TestVersionPrefix:
                 service.exit_with_success("msg")
 
         data = json.loads(mock_stdout.getvalue())
-        assert data["systemMessage"].startswith("[ai-tracker:0.0.14]")
+        assert data["systemMessage"].startswith("[ai-herald:0.0.14]")
 
     def test_default_version_is_dev(self):
         """Given no version arg, prefix uses 'dev'."""
@@ -86,7 +86,7 @@ class TestVersionPrefix:
                 service.exit_with_success("msg")
 
         data = json.loads(mock_stdout.getvalue())
-        assert data["systemMessage"].startswith("[ai-tracker:dev]")
+        assert data["systemMessage"].startswith("[ai-herald:dev]")
 
     def test_json_format_is_valid(self):
         """Given message, output is valid JSON with correct structure."""

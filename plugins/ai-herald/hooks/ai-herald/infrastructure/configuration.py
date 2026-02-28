@@ -177,7 +177,7 @@ class Configuration:
 class ConfigurationLoader:
     """Loads configuration from config.json file."""
 
-    GLOBAL_DIR = Path.home() / '.claude' / 'ai-contribution-tracker'
+    GLOBAL_DIR = Path.home() / '.claude' / 'ai-herald'
 
     DEFAULT_CONFIG = {
         'enabled': True,
@@ -190,7 +190,7 @@ class ConfigurationLoader:
             '.properties', '.toml', '.sh', '.bash', ".feature"
         ],
         'enable_logging': False,
-        'log_file': 'ai-tracker.log',
+        'log_file': 'ai-herald.log',
         'format_detection': {
             'enabled': True,
             'commands': [

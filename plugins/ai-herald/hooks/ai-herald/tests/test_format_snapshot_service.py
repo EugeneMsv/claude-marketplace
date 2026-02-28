@@ -92,7 +92,7 @@ class TestCapturePreFormat:
 
         assert result is not None
         assert Path(result).exists()
-        assert "format-snapshot-9999.json" in result
+        assert "9999.json" in result
 
     def test_returns_none_when_no_branch(self, temp_dir):
         """Given git_repo returns no branch, returns None."""

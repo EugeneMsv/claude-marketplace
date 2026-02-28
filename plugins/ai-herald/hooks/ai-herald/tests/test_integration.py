@@ -188,7 +188,7 @@ class TestMigration:
         }
 
         # Write old format file
-        tracking_path = temp_dir / '.claude' / 'ai-tracking-test-branch.json'
+        tracking_path = temp_dir / '.claude' / 'herald' / 'test-branch.json'
         tracking_path.parent.mkdir(parents=True, exist_ok=True)
         with open(tracking_path, 'w') as f:
             json.dump(old_format_data, f)
@@ -240,7 +240,7 @@ class TestMigration:
             "ai_removed_line_hashes": {}
         }
 
-        tracking_path = temp_dir / '.claude' / 'ai-tracking-test-branch.json'
+        tracking_path = temp_dir / '.claude' / 'herald' / 'test-branch.json'
         tracking_path.parent.mkdir(parents=True, exist_ok=True)
         with open(tracking_path, 'w') as f:
             json.dump(old_format_data, f)

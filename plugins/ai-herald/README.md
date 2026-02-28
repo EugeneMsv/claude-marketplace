@@ -1,6 +1,6 @@
-# AI Contribution Tracker
+# AI Herald
 
-Automatically tracks AI vs human contributions in your codebase and injects statistics into git commit messages.
+Watches every AI write, then announces attribution stats at commit time — injecting AI vs human contribution percentages into git commit messages.
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ Automatically tracks AI vs human contributions in your codebase and injects stat
 
 ## Prerequisites
 
-Before using the AI Contribution Tracker, ensure the following requirements are met:
+Before using AI Herald, ensure the following requirements are met:
 
 - **Git CLI**: Required for all tracking functionality
 - **Git Working Directory**: Must be in a git repository
@@ -164,7 +164,7 @@ The system recognizes that despite whitespace changes, the semantic content matc
 
 **Temporary Files:**
 
-- Snapshots stored in `.claude/format-snapshot-{pid}.json` during formatting
+- Snapshots stored in `.claude/herald/formatting/{pid}.json` during formatting
 - Automatically cleaned up after post-format processing
 - Contains pre-format file content and AI line hashes
 
@@ -180,24 +180,24 @@ Hooks are configured in `hooks.json` which will be automatically added:
     "PreToolUse": [
       {
         "matcher": "Write",
-        "hooks": [{"command": "python3 $HOME/.claude/hooks/ai-contribution-tracker/ai-tracker-write-pre.py"}]
+        "hooks": [{"command": "python3 $HOME/.claude/hooks/ai-herald/herald-pre-writer.py"}]
       },
       {
         "matcher": "Bash",
-        "hooks": [{"command": "python3 $HOME/.claude/hooks/ai-contribution-tracker/ai-tracker-format-pre.py"}]
+        "hooks": [{"command": "python3 $HOME/.claude/hooks/ai-herald/herald-pre-formatter.py"}]
       }
     ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit",
-        "hooks": [{"command": "python3 $HOME/.claude/hooks/ai-contribution-tracker/ai-tracker-capture.py"}]
+        "hooks": [{"command": "python3 $HOME/.claude/hooks/ai-herald/herald-change-captor.py"}]
       },
       {
         "matcher": "Bash",
         "hooks": [
-          {"command": "python3 $HOME/.claude/hooks/ai-contribution-tracker/ai-tracker-inject.py"},
-          {"command": "python3 $HOME/.claude/hooks/ai-contribution-tracker/ai-tracker-mr-update.py"},
-          {"command": "python3 $HOME/.claude/hooks/ai-contribution-tracker/ai-tracker-format-post.py"}
+          {"command": "python3 $HOME/.claude/hooks/ai-herald/herald-stats-injector.py"},
+          {"command": "python3 $HOME/.claude/hooks/ai-herald/herald-mr-injector.py"},
+          {"command": "python3 $HOME/.claude/hooks/ai-herald/herald-post-formatter.py"}
         ]
       }
     ]
@@ -207,22 +207,22 @@ Hooks are configured in `hooks.json` which will be automatically added:
 
 **Hook Execution Order:**
 
-1. **PreToolUse Bash** → `ai-tracker-format-pre.py` (captures state before formatting), `ai-tracker-commit-pre.py` (records commit intent before git commit)
-2. **PostToolUse Write/Edit** → `ai-tracker-capture.py` (records AI-written lines)
-3. **PostToolUse Bash** → `ai-tracker-inject.py` (injects stats on commit, recovers missed injection on push), then `ai-tracker-mr-update.py` (updates MR on push), then `ai-tracker-format-post.py` (updates attribution after formatting)
+1. **PreToolUse Bash** → `herald-pre-formatter.py` (captures state before formatting), `herald-pre-committer.py` (records commit intent before git commit)
+2. **PostToolUse Write/Edit** → `herald-change-captor.py` (records AI-written lines)
+3. **PostToolUse Bash** → `herald-stats-injector.py` (injects stats on commit, recovers missed injection on push), then `herald-mr-injector.py` (updates MR on push), then `herald-post-formatter.py` (updates attribution after formatting)
 
 ## Configuration
 
 Configuration and log files are stored at a fixed global location:
 
 ```
-$HOME/.claude/ai-contribution-tracker/config.json
-$HOME/.claude/ai-contribution-tracker/ai-tracker.log
+$HOME/.claude/ai-herald/config.json
+$HOME/.claude/ai-herald/ai-herald.log
 ```
 
-The directory is created automatically if it doesn't exist. This path is stable regardless of how the tracker is installed (direct or marketplace plugin).
+The directory is created automatically if it doesn't exist. This path is stable regardless of how the herald is installed (direct or marketplace plugin).
 
-**Version Prefix**: Hook output messages include the plugin version in the prefix (e.g., `[ai-tracker:0.0.14]`). When installed as a marketplace plugin, the version is read from `.claude-plugin/plugin.json` via `CLAUDE_PLUGIN_ROOT`. For direct installations, the prefix shows `[ai-tracker:dev]`.
+**Version Prefix**: Hook output messages include the plugin version in the prefix (e.g., `[ai-herald:0.0.14]`). When installed as a marketplace plugin, the version is read from `.claude-plugin/plugin.json` via `CLAUDE_PLUGIN_ROOT`. For direct installations, the prefix shows `[ai-herald:dev]`.
 
 Edit `config.json` to customize:
 
@@ -235,7 +235,7 @@ Edit `config.json` to customize:
     ".yml", ".json", ".sql"
   ],
   "enable_logging": true,
-  "log_file": "ai-tracker.log",
+  "log_file": "ai-herald.log",
   "mr": {
     "titleUpdateEnabled": false,
     "descriptionUpdateEnabled": false,
@@ -603,7 +603,7 @@ This is by design to provide accurate attribution of **semantic code contributio
 
 ## Tracking Files
 
-Per-branch tracking files are stored in `.claude/ai-tracking-{branch}.json`:
+Per-branch tracking files are stored in `.claude/herald/{branch}.json`:
 
 ```json
 {
@@ -622,7 +622,7 @@ Per-branch tracking files are stored in `.claude/ai-tracking-{branch}.json`:
 }
 ```
 
-**Note**: Tracking files must be deleted manually if you want to reset stats or recalculate from scratch. Delete `.claude/ai-tracking-{branch}.json` to start fresh.
+**Note**: Tracking files must be deleted manually if you want to reset stats or recalculate from scratch. Delete `.claude/herald/{branch}.json` to start fresh.
 
 ## Disabling
 
@@ -636,25 +636,26 @@ Per-branch tracking files are stored in `.claude/ai-tracking-{branch}.json`:
 
 ## Structure
 
-- `ai-tracker-capture.py` - Capture hook entry point (PostToolUse Write/Edit)
-- `ai-tracker-commit-pre.py` - Commit pre-hook entry point (PreToolUse Bash - records commit intent before git commit)
-- `ai-tracker-inject.py` - Inject hook entry point (PostToolUse Bash - injects stats on commit, recovers missed injection on push)
-- `ai-tracker-mr-update.py` - MR update hook entry point (PostToolUse Bash - push)
-- `ai-tracker-format-pre.py` - Format pre-hook entry point (PreToolUse Bash)
-- `ai-tracker-format-post.py` - Format post-hook entry point (PostToolUse Bash - formatting)
+- `herald-change-captor.py` - Capture hook entry point (PostToolUse Write/Edit)
+- `herald-pre-committer.py` - Commit pre-hook entry point (PreToolUse Bash - records commit intent before git commit)
+- `herald-stats-injector.py` - Inject hook entry point (PostToolUse Bash - injects stats on commit, recovers missed injection on push)
+- `herald-mr-injector.py` - MR update hook entry point (PostToolUse Bash - push)
+- `herald-pre-formatter.py` - Format pre-hook entry point (PreToolUse Bash)
+- `herald-post-formatter.py` - Format post-hook entry point (PostToolUse Bash - formatting)
+- `herald-pre-writer.py` - Write pre-hook entry point (PreToolUse Write - snapshots file before overwrite)
 - `config.json` - Configuration
 - `domain/` - Business logic (LineHasher, Diff, TrackingData, ContributionStats, FormatSnapshot, TokenNormalizer)
 - `infrastructure/` - Git, GitLab, and file operations (GitRepository, GlabRepository, TrackingRepository, Configuration)
 - `services/` - Workflow coordination (CaptureService, InjectService, MrService, StatsCalculator, FormatSnapshotService, FormatTrackerService)
 - `tests/` - Unit tests
-- `ai-tracker.log` - Debug log (if logging enabled)
+- `ai-herald.log` - Debug log (if logging enabled)
 
 ## Testing
 
 Run all tests with pytest:
 
 ```bash
-cd ~/.claude/hooks/ai-contribution-tracker
+cd ~/.claude/hooks/ai-herald
 python3 -m pytest tests/ -v
 ```
 
@@ -700,4 +701,4 @@ python3 -m pytest tests/ --cov=. --cov-report=html
 | AI% lower than expected | Changes made before branch was created | Always create branch before starting work |
 | `[AI: X%]` not appearing in MR title | `titleUpdateEnabled` is false or no open MR | Enable flag in `config.json`; ensure MR exists |
 | `glab` errors on push | Not authenticated | Run `glab auth login` |
-| Stats not updating after rebase | Tracking file has stale merge_base | Delete `.claude/ai-tracking-{branch}.json` and recommit |
+| Stats not updating after rebase | Tracking file has stale merge_base | Delete `.claude/herald/{branch}.json` and recommit |

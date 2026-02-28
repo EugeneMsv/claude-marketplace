@@ -62,7 +62,7 @@ class FormatTrackerService:
             return False
 
         # Find snapshot file for this PID
-        snapshot_path = git_root / '.claude' / f'format-snapshot-{pid}.json'
+        snapshot_path = git_root / '.claude' / 'herald' / 'formatting' / f'{pid}.json'
 
         if not snapshot_path.exists():
             self._logger.info(f"No snapshot found for PID {pid}")
@@ -203,7 +203,7 @@ class FormatTrackerService:
         Args:
             git_root: Git repository root
         """
-        snapshot_dir = git_root / '.claude'
+        snapshot_dir = git_root / '.claude' / 'herald' / 'formatting'
         if not snapshot_dir.exists():
             return
 
@@ -211,7 +211,7 @@ class FormatTrackerService:
             current_time = time.time()
             stale_threshold = 3600  # 1 hour in seconds
 
-            for snapshot_file in snapshot_dir.glob('format-snapshot-*.json'):
+            for snapshot_file in snapshot_dir.glob('*.json'):
                 try:
                     file_age = current_time - snapshot_file.stat().st_mtime
                     if file_age > stale_threshold:

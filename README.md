@@ -12,14 +12,14 @@ marketplace/
 ├── CONTRIBUTING.md        # Submission guidelines
 ├── LICENSE                # MIT license
 └── plugins/               # Plugin directory
-    └── ai-contribution-tracker/
+    └── ai-herald/
 ```
 
 ## Available Plugins
 
-### ai-contribution-tracker
+### ai-herald
 
-Automatically tracks AI vs human contributions in your codebase.
+Watches every AI write, then announces attribution stats at commit time.
 
 **Features:**
 - Tracks AI-authored lines via Claude Code hooks
@@ -29,7 +29,7 @@ Automatically tracks AI vs human contributions in your codebase.
 - Git diff-based tracking (only branch changes)
 - Automatic housekeeping for stale tracking files
 
-**[Full Documentation →](plugins/ai-contribution-tracker/README.md)**
+**[Full Documentation →](plugins/ai-herald/README.md)**
 
 ## For Users
 
@@ -42,8 +42,8 @@ claude plugin marketplace add https://github.com/EugeneMsv/claude-marketplace.gi
 ### Installing Plugins
 
 ```bash
-# Install ai-contribution-tracker
-claude plugin install ai-contribution-tracker@eug-msv-claude-marketplace
+# Install ai-herald
+claude plugin install ai-herald@eug-msv-claude-marketplace
 ```
 
 ## For Contributors

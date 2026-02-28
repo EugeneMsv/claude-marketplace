@@ -11,7 +11,7 @@ class WriteSnapshotRepository:
     (read + deleted) by the PostToolUse capture hook, bridging the two hook
     invocations so that AI-removed lines can be correctly attributed.
 
-    Snapshots are stored in {git_root}/.claude/write-snapshots/ with filenames
+    Snapshots are stored in {git_root}/.claude/herald/snapshots/ with filenames
     derived from the sha256 of the absolute file path (first 16 hex chars).
     """
 
@@ -22,7 +22,7 @@ class WriteSnapshotRepository:
             git_root: Root directory of the git repository. May be None —
                       in that case save/load_and_delete are safe no-ops.
         """
-        self._dir = git_root / '.claude' / 'write-snapshots' if git_root else None
+        self._dir = git_root / '.claude' / 'herald' / 'snapshots' if git_root else None
 
     def save(self, abs_file_path: str, content: str) -> bool:
         """Snapshot file content before a Write tool overwrites it.

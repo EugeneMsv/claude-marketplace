@@ -22,7 +22,7 @@ class TrackingRepository:
             branch_name: Sanitized branch name for file naming
         """
         self._git_root = git_root
-        self._tracking_path = git_root / '.claude' / f'ai-tracking-{branch_name}.json'
+        self._tracking_path = git_root / '.claude' / 'herald' / f'{branch_name}.json'
 
     def exists(self) -> bool:
         """Check if tracking file exists.

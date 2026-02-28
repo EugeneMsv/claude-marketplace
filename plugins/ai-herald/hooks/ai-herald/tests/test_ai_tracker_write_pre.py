@@ -1,4 +1,4 @@
-"""Tests for ai-tracker-write-pre.py hook."""
+"""Tests for herald-pre-writer.py hook."""
 
 import importlib.util
 import io
@@ -18,9 +18,9 @@ from infrastructure.hook_output_service import HookOutputService
 
 
 def _load_hook_module():
-    """Load ai-tracker-write-pre.py via importlib (hyphen in name)."""
-    hook_path = HOOK_DIR / 'ai-tracker-write-pre.py'
-    spec = importlib.util.spec_from_file_location('ai_tracker_write_pre', hook_path)
+    """Load herald-pre-writer.py via importlib (hyphen in name)."""
+    hook_path = HOOK_DIR / 'herald-pre-writer.py'
+    spec = importlib.util.spec_from_file_location('herald_pre_writer', hook_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

@@ -84,9 +84,9 @@ class FormatSnapshotService:
             if hash_to_content:
                 snapshot.add_file_content(file_path, hash_to_content)
 
-        snapshot_dir = git_root / '.claude'
-        snapshot_dir.mkdir(exist_ok=True)
-        snapshot_path = snapshot_dir / f'format-snapshot-{pid}.json'
+        snapshot_dir = git_root / '.claude' / 'herald' / 'formatting'
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_path = snapshot_dir / f'{pid}.json'
 
         try:
             snapshot.save_to_file(str(snapshot_path))
