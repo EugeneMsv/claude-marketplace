@@ -1,6 +1,6 @@
 """Tracking data domain model."""
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 from domain.line_hasher import LineHasher
 
 
@@ -23,6 +23,7 @@ class TrackingData:
         self.ai_line_hashes: Dict[str, Dict[str, int]] = {}
         self.ai_removed_line_hashes: Dict[str, Dict[str, int]] = {}
         self.files_tracked: List[str] = []
+        self.ai_deleted_files: Set[str] = set()
         self.stats: Optional[Dict] = None
         self.last_updated: Optional[str] = None
         self.pending_inject_head: Optional[str] = None
@@ -152,3 +153,15 @@ class TrackingData:
             Dict mapping line hash to occurrence count (empty dict if file not tracked)
         """
         return self.ai_removed_line_hashes.get(file_path, {}).copy()
+
+    def mark_file_deleted_by_ai(self, file_path: str) -> None:
+        """Mark a file as wholly deleted by AI.
+
+        Adds to ai_deleted_files set. When a file is in this set, the stats
+        calculator attributes all its removed lines to AI without per-line
+        hash matching.
+
+        Args:
+            file_path: Git-root-relative path of the deleted file
+        """
+        self.ai_deleted_files.add(file_path)

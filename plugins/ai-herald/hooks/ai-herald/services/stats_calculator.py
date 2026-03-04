@@ -55,12 +55,19 @@ class StatsCalculator:
                 tracking
             )
 
-            # Count AI vs human lines for removals
-            ai_removed_count, total_removed_count = self._count_removed_lines(
-                file_path,
-                file_diff.removed_lines,
-                tracking
-            )
+            # Count AI vs human lines for removals.
+            # O(1) set lookup: if AI deleted the whole file, every removed line is AI.
+            if file_path in tracking.ai_deleted_files:
+                total_removed_count = len([
+                    l for l in file_diff.removed_lines if self._hasher.normalize(l)
+                ])
+                ai_removed_count = total_removed_count
+            else:
+                ai_removed_count, total_removed_count = self._count_removed_lines(
+                    file_path,
+                    file_diff.removed_lines,
+                    tracking
+                )
 
             total_ai_added += ai_added_count
             total_ai_removed += ai_removed_count
@@ -95,9 +102,22 @@ class StatsCalculator:
                 continue
             file_diff = diff.get_file_diff(file_path)
             _, added_count = self._count_file_lines(file_path, file_diff.added_lines, tracking)
-            _, removed_count = self._count_removed_lines(file_path, file_diff.removed_lines, tracking)
+
+            # O(1) set lookup: if AI deleted the whole file, attribute all removals to AI.
+            if file_path in tracking.ai_deleted_files:
+                removed_count = len([
+                    l for l in file_diff.removed_lines if self._hasher.normalize(l)
+                ])
+                ai_removed_count = removed_count
+            else:
+                _, removed_count = self._count_removed_lines(
+                    file_path, file_diff.removed_lines, tracking
+                )
+                ai_removed_count = 0
+
             total_added += added_count
             total_removed += removed_count
+            total_ai_removed += ai_removed_count
             ext = Path(file_path).suffix.lower()
             if ext not in by_file_type:
                 by_file_type[ext] = {
@@ -108,6 +128,7 @@ class StatsCalculator:
                 }
             by_file_type[ext]['total_added'] += added_count
             by_file_type[ext]['total_removed'] += removed_count
+            by_file_type[ext]['ai_removed'] += ai_removed_count
 
         # Build overall ContributorStats
         ai_total = total_ai_added + total_ai_removed

@@ -59,6 +59,7 @@ class TrackingRepository:
         tracking.last_updated = data.get('last_updated')
         tracking.pending_inject_head = data.get('pending_inject_head')
         tracking.files_tracked = data.get('files_tracked', [])
+        tracking.ai_deleted_files = set(data.get('ai_deleted_files', []))
 
         # Migrate hash data from old format (list) to new format (dict with counts)
         if 'ai_line_hashes' in data:
@@ -154,7 +155,8 @@ class TrackingRepository:
             'last_updated': tracking.last_updated,
             'pending_inject_head': tracking.pending_inject_head,
             'ai_line_hashes': tracking.ai_line_hashes,
-            'ai_removed_line_hashes': tracking.ai_removed_line_hashes
+            'ai_removed_line_hashes': tracking.ai_removed_line_hashes,
+            'ai_deleted_files': list(tracking.ai_deleted_files),
         }
 
         # Atomic write with temp file
