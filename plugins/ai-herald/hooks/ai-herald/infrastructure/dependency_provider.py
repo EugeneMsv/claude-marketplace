@@ -38,6 +38,7 @@ class DependencyProvider:
         self._trace_id: Optional[str] = None
         self._git_repo: Optional[GitRepository] = None
         self._detector = None
+        self._deletion_targets_detector = None
 
     def config(self) -> Configuration:
         """Return cached Configuration, loading it on first call."""
@@ -76,6 +77,13 @@ class DependencyProvider:
             from services.bash_command_detector import BashCommandDetector
             self._detector = BashCommandDetector(self.config())
         return self._detector
+
+    def deletion_targets_detector(self) -> 'DeletionTargetsDetector':
+        """Return cached DeletionTargetsDetector."""
+        if self._deletion_targets_detector is None:
+            from services.deletion_targets_detector import DeletionTargetsDetector
+            self._deletion_targets_detector = DeletionTargetsDetector()
+        return self._deletion_targets_detector
 
     # --- Service builders ---
 
@@ -129,3 +137,10 @@ class DependencyProvider:
         """Build and return a fully-wired HousekeepingService."""
         from services.housekeeping_service import HousekeepingService
         return HousekeepingService(self.git_repo(), self.config(), self.logger())
+
+    def build_deletion_tracker_service(self) -> 'DeletionTrackerService':
+        """Build and return a fully-wired DeletionTrackerService."""
+        from services.deletion_tracker_service import DeletionTrackerService
+        return DeletionTrackerService(
+            self.git_repo(), self.config(), self.logger()
+        )

@@ -56,6 +56,11 @@
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-herald/herald-post-formatter.py",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-herald/herald-bash-delete.py",
+            "timeout": 10
           }
         ]
       }

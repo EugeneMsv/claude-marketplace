@@ -102,10 +102,14 @@ class Diff:
         current_file = None
         current_added = []
         current_removed = []
+        pending_deleted = None
 
         for line in output.splitlines():
-            # Track current file from "+++ b/filepath" headers
-            if line.startswith('+++ b/'):
+            if line.startswith('--- a/'):
+                # Record candidate path for a potential deletion
+                pending_deleted = line[6:]  # Strip "--- a/" prefix
+
+            elif line.startswith('+++ b/'):
                 # Save previous file if exists
                 if current_file:
                     files[current_file] = DiffFile(current_file, current_added, current_removed)
@@ -114,6 +118,17 @@ class Diff:
                 current_file = line[6:]  # Strip "+++ b/" prefix
                 current_added = []
                 current_removed = []
+                pending_deleted = None
+
+            elif line.startswith('+++ /dev/null'):
+                # Deleted file: use the --- a/ path recorded above
+                if current_file:
+                    files[current_file] = DiffFile(current_file, current_added, current_removed)
+
+                current_file = pending_deleted
+                current_added = []
+                current_removed = []
+                pending_deleted = None
 
             # Lines starting with + (but not +++) are added lines
             elif line.startswith('+') and not line.startswith('+++'):

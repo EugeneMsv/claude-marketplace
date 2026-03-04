@@ -15,6 +15,15 @@ _GIT_GLOBAL_FLAGS = rf'(?:\s+{_GIT_GLOBAL_OPT})*'
 _COMMIT_PATTERN = re.compile(rf'\bgit{_GIT_GLOBAL_FLAGS}\s+commit\b')
 _PUSH_PATTERN   = re.compile(rf'\bgit{_GIT_GLOBAL_FLAGS}\s+push\b')
 
+# Patterns for file deletion commands.
+# Captures targets after optional flag tokens (tokens starting with '-').
+_RM_PATTERN      = re.compile(r'\brm\b((?:\s+(?:-\S+|\S+))*)')
+_GIT_RM_PATTERN  = re.compile(rf'\bgit{_GIT_GLOBAL_FLAGS}\s+rm\b((?:\s+(?:-\S+|\S+))*)')
+_UNLINK_PATTERN  = re.compile(r'\bunlink\b\s+(\S+)')
+
+# Grouped for boolean detection (gate check only — extraction uses patterns individually).
+_DELETION_PATTERNS = [_GIT_RM_PATTERN, _UNLINK_PATTERN, _RM_PATTERN]
+
 
 class DetectedCommand(Enum):
     """Enumeration of recognized bash command types."""
@@ -24,6 +33,7 @@ class DetectedCommand(Enum):
     GIT_PUSH = "git_push"
     GIT_PUSH_TAGS = "git_push_tags"
     CODE_FORMATTER = "code_formatter"
+    BASH_FILE_DELETION = "bash_file_deletion"
     UNIDENTIFIED = "unidentified"
 
 
@@ -57,6 +67,7 @@ class BashCommandDetector:
             DetectedCommand.GIT_PUSH_TAGS: lambda cmd: bool(_PUSH_PATTERN.search(cmd)) and ('--tags' in cmd or 'refs/tags/' in cmd),
             DetectedCommand.GIT_PUSH: lambda cmd: bool(_PUSH_PATTERN.search(cmd)) and '--tags' not in cmd and 'refs/tags/' not in cmd,
             DetectedCommand.CODE_FORMATTER: formatter_predicate,
+            DetectedCommand.BASH_FILE_DELETION: lambda cmd: any(p.search(cmd) for p in _DELETION_PATTERNS),
         }
 
     def detect_commands(self, command: str) -> set[DetectedCommand]:
