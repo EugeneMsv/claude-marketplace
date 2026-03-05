@@ -32,8 +32,9 @@ Before using AI Herald, ensure the following requirements are met:
   - Install: Follow instructions at [glab installation](https://gitlab.com/gitlab-org/cli#installation)
   - Authenticate: Run `glab auth login` after installation
 
-> **Important**: Only changes made via Claude Code's `Write` and `Edit` tools (sometimes referred to as `Update` by Claude Code) are counted as AI contributions.
-> Any changes made outside Claude Code, or through any other Claude Code tool, are counted as human contributions.
+> **Important**: Only changes made via Claude Code's `Write` and `Edit` tools (sometimes referred to as `Update` by Claude Code) are counted as AI contributions for line additions.
+> File deletions via `rm`, `git rm`, or `unlink` Bash commands are also counted as AI contributions — all removed lines from the deleted file are attributed to AI.
+> Any other changes made outside Claude Code, or through any other Claude Code tool, are counted as human contributions.
 
 ## Features
 
@@ -48,6 +49,7 @@ Before using AI Herald, ensure the following requirements are met:
 - **MR Auto-Creation**: Optionally creates draft MRs automatically on first push when no MR exists (disabled by default)
 - **MR AI Labeling**: Optionally attaches a GitLab label (`AI:85%`) reflecting the AI contribution percentage; auto-updates on subsequent pushes (disabled by default)
 - **Missed Commit Recovery**: Automatically recovers AI stats injection for commits made inside chained commands that partially failed (e.g. `git add && git commit && git push` where push fails)
+- **Bash Deletion Tracking**: When AI runs `rm`, `git rm`, or `unlink` via the Bash tool, all removed lines from the deleted file are attributed to AI automatically
 - **Automatic Housekeeping**: Cleans up stale tracking files for deleted/merged branches
 - **Configurable**: Support for multiple base branches, file extensions, and logging
 
@@ -56,8 +58,8 @@ Before using AI Herald, ensure the following requirements are met:
 > These are known constraints of the current implementation. Understanding them helps avoid
 > surprises with contribution percentages.
 
-- **Tool-scoped attribution only**: Only `Write` and `Edit` tool calls are captured as AI contributions.
-  Cherry-picks, patches, `git apply`, Bash-based file edits, and manual changes are all counted as human —
+- **Tool-scoped attribution for additions**: Only `Write` and `Edit` tool calls are captured as AI contributions for line additions. File deletions via `rm`, `git rm`, or `unlink` Bash commands are also tracked — all removed lines from such files are attributed to AI.
+  Cherry-picks, patches, `git apply`, Bash-based file edits (other than deletions), and manual changes are all counted as human —
   even if the original code was AI-authored on another branch.
 - **Feature branch must exist before any file changes**: Tracking is branch-scoped and starts from the
   moment the branch is created. Any AI-authored changes made before the branch was created are not
@@ -101,12 +103,13 @@ Before using AI Herald, ensure the following requirements are met:
 1. **Write Pre Hook** (PreToolUse Write): Snapshots existing file content before a Write overwrites it, enabling accurate AI-removed line tracking
 2. **Capture Hook** (PostToolUse Write/Edit): Records AI-added line hashes; for Write operations, reads the pre-write snapshot to also record AI-removed lines
 3. **Commit Pre Hook** (PreToolUse Bash): Before a `git commit`, records the current HEAD hash into the tracking file as a commit intent marker
-4. **Format Pre Hook** (PreToolUse Bash): Captures file state before formatting commands
-5. **Format Post Hook** (PostToolUse Bash): Updates AI attribution after formatting using token-based matching
-6. **Inject Hook** (PostToolUse Bash): On commit, calculates stats and amends commit message; on `git push`, checks for a pending commit intent and recovers any missed injection
-7. **Housekeeping**: Automatically cleans up stale tracking files during inject hook
-8. **MR Update Hook** (PostToolUse Bash): On push, independently applies any enabled MR features — title tag, description stats, `AI:X%` label, and/or draft MR auto-creation (all opt-in, each flag independent)
-9. **Git Diff Analysis**: Uses `git diff <merge-base> HEAD` to count only branch changes
+4. **Bash Delete Hook** (PostToolUse Bash): Inspects each Bash command for `rm`/`git rm`/`unlink` patterns; cross-references against uncommitted git-deleted files; marks matched files as AI-deleted in tracking data so all their removed lines are attributed to AI at commit time
+5. **Format Pre Hook** (PreToolUse Bash): Captures file state before formatting commands
+6. **Format Post Hook** (PostToolUse Bash): Updates AI attribution after formatting using token-based matching
+7. **Inject Hook** (PostToolUse Bash): On commit, calculates stats and amends commit message; on `git push`, checks for a pending commit intent and recovers any missed injection
+8. **Housekeeping**: Automatically cleans up stale tracking files during inject hook
+9. **MR Update Hook** (PostToolUse Bash): On push, independently applies any enabled MR features — title tag, description stats, `AI:X%` label, and/or draft MR auto-creation (all opt-in, each flag independent)
+10. **Git Diff Analysis**: Uses `git diff <merge-base> HEAD` to count only branch changes
 
 **Format Attribution Preservation**:
 
@@ -170,9 +173,9 @@ The system recognizes that despite whitespace changes, the semantic content matc
 
 ## Installation
 
-Install using claude code plugin's feature
+**Preferred method**: Install via the Claude Code plugin marketplace. Once installed, hooks are registered automatically — no manual configuration needed.
 
-Hooks are configured in `hooks.json` which will be automatically added:
+For reference, the hooks registered by the plugin are:
 
 ```json
 {
@@ -180,24 +183,28 @@ Hooks are configured in `hooks.json` which will be automatically added:
     "PreToolUse": [
       {
         "matcher": "Write",
-        "hooks": [{"command": "python3 $HOME/.claude/hooks/ai-herald/herald-pre-writer.py"}]
+        "hooks": [{"command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-herald/herald-pre-writer.py"}]
       },
       {
         "matcher": "Bash",
-        "hooks": [{"command": "python3 $HOME/.claude/hooks/ai-herald/herald-pre-formatter.py"}]
+        "hooks": [
+          {"command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-herald/herald-pre-formatter.py"},
+          {"command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-herald/herald-pre-committer.py"}
+        ]
       }
     ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit",
-        "hooks": [{"command": "python3 $HOME/.claude/hooks/ai-herald/herald-change-captor.py"}]
+        "hooks": [{"command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-herald/herald-change-captor.py"}]
       },
       {
         "matcher": "Bash",
         "hooks": [
-          {"command": "python3 $HOME/.claude/hooks/ai-herald/herald-stats-injector.py"},
-          {"command": "python3 $HOME/.claude/hooks/ai-herald/herald-mr-injector.py"},
-          {"command": "python3 $HOME/.claude/hooks/ai-herald/herald-post-formatter.py"}
+          {"command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-herald/herald-stats-injector.py"},
+          {"command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-herald/herald-mr-injector.py"},
+          {"command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-herald/herald-post-formatter.py"},
+          {"command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/ai-herald/herald-bash-delete.py"}
         ]
       }
     ]
@@ -209,7 +216,7 @@ Hooks are configured in `hooks.json` which will be automatically added:
 
 1. **PreToolUse Bash** → `herald-pre-formatter.py` (captures state before formatting), `herald-pre-committer.py` (records commit intent before git commit)
 2. **PostToolUse Write/Edit** → `herald-change-captor.py` (records AI-written lines)
-3. **PostToolUse Bash** → `herald-stats-injector.py` (injects stats on commit, recovers missed injection on push), then `herald-mr-injector.py` (updates MR on push), then `herald-post-formatter.py` (updates attribution after formatting)
+3. **PostToolUse Bash** → `herald-stats-injector.py` (injects stats on commit, recovers missed injection on push), then `herald-mr-injector.py` (updates MR on push), then `herald-post-formatter.py` (updates attribution after formatting), then `herald-bash-delete.py` (marks deleted files as AI-deleted)
 
 ## Configuration
 
@@ -613,6 +620,7 @@ Per-branch tracking files are stored in `.claude/herald/{branch}.json`:
     "src/main.py": ["hash1", "hash2", ...]
   },
   "files_tracked": ["src/main.py"],
+  "ai_deleted_files": ["src/old_module.py"],
   "stats": {
     "ai_lines": 42,
     "human_lines": 158,
@@ -621,6 +629,8 @@ Per-branch tracking files are stored in `.claude/herald/{branch}.json`:
   }
 }
 ```
+
+`ai_deleted_files` lists files deleted by AI via `rm`/`git rm`/`unlink`. At commit time all their removed lines are attributed to AI without per-line hash matching.
 
 **Note**: Tracking files must be deleted manually if you want to reset stats or recalculate from scratch. Delete `.claude/herald/{branch}.json` to start fresh.
 
@@ -643,10 +653,11 @@ Per-branch tracking files are stored in `.claude/herald/{branch}.json`:
 - `herald-pre-formatter.py` - Format pre-hook entry point (PreToolUse Bash)
 - `herald-post-formatter.py` - Format post-hook entry point (PostToolUse Bash - formatting)
 - `herald-pre-writer.py` - Write pre-hook entry point (PreToolUse Write - snapshots file before overwrite)
+- `herald-bash-delete.py` - Bash file deletion hook entry point (PostToolUse Bash - detects `rm`/`git rm`/`unlink` and marks deleted files as AI-deleted)
 - `config.json` - Configuration
 - `domain/` - Business logic (LineHasher, Diff, TrackingData, ContributionStats, FormatSnapshot, TokenNormalizer)
 - `infrastructure/` - Git, GitLab, and file operations (GitRepository, GlabRepository, TrackingRepository, Configuration)
-- `services/` - Workflow coordination (CaptureService, InjectService, MrService, StatsCalculator, FormatSnapshotService, FormatTrackerService)
+- `services/` - Workflow coordination (CaptureService, InjectService, MrService, StatsCalculator, FormatSnapshotService, FormatTrackerService, DeletionTrackerService, DeletionTargetsDetector)
 - `tests/` - Unit tests
 - `ai-herald.log` - Debug log (if logging enabled)
 
@@ -701,4 +712,3 @@ python3 -m pytest tests/ --cov=. --cov-report=html
 | AI% lower than expected | Changes made before branch was created | Always create branch before starting work |
 | `[AI: X%]` not appearing in MR title | `titleUpdateEnabled` is false or no open MR | Enable flag in `config.json`; ensure MR exists |
 | `glab` errors on push | Not authenticated | Run `glab auth login` |
-| Stats not updating after rebase | Tracking file has stale merge_base | Delete `.claude/herald/{branch}.json` and recommit |
