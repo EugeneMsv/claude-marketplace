@@ -1,7 +1,7 @@
 """Contribution statistics domain models."""
 
 from typing import Dict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -25,6 +25,19 @@ class ContributorStats:
     total: LineStats
     added: LineStats
     removed: LineStats
+
+
+@dataclass(frozen=True)
+class CodeGenStats:
+    """Statistics for code-generated files (excluded from AI/Human percentages).
+
+    Immutable value object containing line counts and the set of patterns that
+    matched at least one file in the commit.
+    """
+    total: int
+    added: int
+    removed: int
+    matched_patterns: frozenset
 
 
 @dataclass(frozen=True)
@@ -52,7 +65,8 @@ class ContributionStats:
         self,
         ai_stats: ContributorStats,
         human_stats: ContributorStats,
-        by_file_type: Dict[str, FileTypeStats]
+        by_file_type: Dict[str, FileTypeStats],
+        code_generated: CodeGenStats = None
     ):
         """Initialize contribution statistics.
 
@@ -60,10 +74,14 @@ class ContributionStats:
             ai_stats: ContributorStats for AI contributions
             human_stats: ContributorStats for human contributions
             by_file_type: Statistics broken down by file extension
+            code_generated: Stats for code-generated files (excluded from AI/Human %)
         """
         self._ai_stats = ai_stats
         self._human_stats = human_stats
         self._by_file_type = by_file_type.copy()
+        self._code_generated: CodeGenStats = code_generated if code_generated is not None else CodeGenStats(
+            total=0, added=0, removed=0, matched_patterns=frozenset()
+        )
 
     @classmethod
     def from_dict(cls, data: Dict) -> 'ContributionStats':
@@ -98,7 +116,20 @@ class ContributionStats:
                 file_count=ft['file_count'],
             )
 
-        return cls(ai_stats=ai_stats, human_stats=human_stats, by_file_type=by_file_type)
+        cg_data = data.get('code_generated', {})
+        code_generated = CodeGenStats(
+            total=cg_data.get('total', 0),
+            added=cg_data.get('added', 0),
+            removed=cg_data.get('removed', 0),
+            matched_patterns=frozenset(cg_data.get('matched_patterns', [])),
+        )
+
+        return cls(
+            ai_stats=ai_stats,
+            human_stats=human_stats,
+            by_file_type=by_file_type,
+            code_generated=code_generated,
+        )
 
     @property
     def ai_stats(self) -> ContributorStats:
@@ -129,6 +160,11 @@ class ContributionStats:
     def ai_percentage(self) -> float:
         """Get AI contribution percentage."""
         return self._ai_stats.total.percentage
+
+    @property
+    def code_generated(self) -> CodeGenStats:
+        """Get code-generated file statistics."""
+        return self._code_generated
 
     @property
     def by_file_type(self) -> Dict[str, FileTypeStats]:
@@ -186,6 +222,12 @@ class ContributionStats:
                     'file_count': stats.file_count
                 }
                 for ext, stats in self._by_file_type.items()
+            },
+            'code_generated': {
+                'total': self._code_generated.total,
+                'added': self._code_generated.added,
+                'removed': self._code_generated.removed,
+                'matched_patterns': sorted(self._code_generated.matched_patterns),
             }
         }
 
@@ -242,6 +284,14 @@ class ContributionStats:
         tracked = self._format_tracked_extensions()
         if tracked:
             msg += f"\n{tracked}"
+
+        # Append code-gen section when there are code-generated lines
+        if self._code_generated.total > 0:
+            msg += f"\n  Code-Gen: {self._code_generated.total} lines excluded"
+            msg += f"\n    +{self._code_generated.added} -{self._code_generated.removed}"
+            if self._code_generated.matched_patterns:
+                patterns_str = ", ".join(sorted(self._code_generated.matched_patterns))
+                msg += f"\n    Matched patterns: {patterns_str}"
 
         return msg
 

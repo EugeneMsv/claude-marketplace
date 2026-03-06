@@ -3,7 +3,7 @@
 import json
 import os
 from pathlib import Path
-from typing import List, Set
+from typing import List, Set, Optional
 
 
 class Configuration:
@@ -27,7 +27,8 @@ class Configuration:
         mr_labeling_enabled: bool = False,
         housekeeping_enabled: bool = False,
         housekeeping_stale_days: int = 7,
-        housekeeping_max_files: int = 5
+        housekeeping_max_files: int = 5,
+        code_generated_patterns: Optional[Set[str]] = None
     ):
         """Initialize configuration.
 
@@ -46,6 +47,7 @@ class Configuration:
             housekeeping_enabled: Whether housekeeping is enabled
             housekeeping_stale_days: Days threshold for stale tracking files
             housekeeping_max_files: Max files to process per housekeeping run
+            code_generated_patterns: Ant-style glob patterns for code-generated files
         """
         self._enabled = enabled
         self._base_branches = base_branches.copy()
@@ -61,6 +63,7 @@ class Configuration:
         self._housekeeping_enabled = housekeeping_enabled
         self._housekeeping_stale_days = housekeeping_stale_days
         self._housekeeping_max_files = housekeeping_max_files
+        self._code_generated_patterns: Set[str] = set(code_generated_patterns) if code_generated_patterns else set()
 
         # Environment variables can override
         self._disable_env = os.environ.get('DISABLE_AI_STATS', '0') == '1'
@@ -151,6 +154,11 @@ class Configuration:
         """Get max files to process per housekeeping run."""
         return self._housekeeping_max_files
 
+    @property
+    def code_generated_patterns(self) -> Set[str]:
+        """Get Ant-style glob patterns for code-generated files."""
+        return self._code_generated_patterns.copy()
+
     def is_extension_tracked(self, extension: str) -> bool:
         """Check if a file extension is tracked.
 
@@ -213,7 +221,20 @@ class ConfigurationLoader:
             'enabled': False,
             'staleDaysThreshold': 7,
             'maxFilesPerRun': 5
-        }
+        },
+        'code_generated_patterns': [
+            '**/generated/**',
+            '**/__generated__/**',
+            '**/gen/**',
+            '**/*.generated.ts',
+            '**/*.generated.js',
+            '**/*.generated.java',
+            '**/*.pb.go',
+            '**/*_pb2.py',
+            '**/*_pb2_grpc.py',
+            '**/build/generated/**',
+            '**/target/generated-sources/**'
+        ]
     }
 
     @staticmethod
@@ -304,6 +325,9 @@ class ConfigurationLoader:
         housekeeping_stale_days = housekeeping_config.get('staleDaysThreshold', default_housekeeping['staleDaysThreshold'])
         housekeeping_max_files = housekeeping_config.get('maxFilesPerRun', default_housekeeping['maxFilesPerRun'])
 
+        default_code_gen_patterns = ConfigurationLoader.DEFAULT_CONFIG['code_generated_patterns']
+        code_generated_patterns = set(config_dict.get('code_generated_patterns', default_code_gen_patterns))
+
         return Configuration(
             enabled=config_dict.get('enabled', ConfigurationLoader.DEFAULT_CONFIG['enabled']),
             base_branches=config_dict.get('base_branches', ConfigurationLoader.DEFAULT_CONFIG['base_branches']),
@@ -318,7 +342,8 @@ class ConfigurationLoader:
             mr_labeling_enabled=mr_labeling_enabled,
             housekeeping_enabled=housekeeping_enabled,
             housekeeping_stale_days=housekeeping_stale_days,
-            housekeeping_max_files=housekeeping_max_files
+            housekeeping_max_files=housekeeping_max_files,
+            code_generated_patterns=code_generated_patterns
         )
 
     @staticmethod

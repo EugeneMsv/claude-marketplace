@@ -494,3 +494,98 @@ class TestResolvePluginVersion:
         monkeypatch.setenv('CLAUDE_PLUGIN_ROOT', str(tmp_path))
 
         assert ConfigurationLoader.resolve_plugin_version() == "dev"
+
+
+class TestConfigurationCodeGeneratedPatterns:
+    """Tests for code_generated_patterns field."""
+
+    def test_code_generated_patterns_default_is_empty_set(self):
+        """Given no code_generated_patterns arg, defaults to empty set."""
+        config = Configuration(
+            enabled=True,
+            base_branches=["main"],
+            tracked_extensions={".py"},
+            enable_logging=False,
+            log_file="test.log",
+        )
+        assert config.code_generated_patterns == set()
+
+    def test_code_generated_patterns_stores_given_set(self):
+        """Given code_generated_patterns set, property returns a copy of it."""
+        patterns = {"**/generated/**", "**/*.generated.ts"}
+        config = Configuration(
+            enabled=True,
+            base_branches=["main"],
+            tracked_extensions={".py"},
+            enable_logging=False,
+            log_file="test.log",
+            code_generated_patterns=patterns,
+        )
+        assert config.code_generated_patterns == patterns
+
+    def test_code_generated_patterns_returns_copy(self):
+        """Given patterns, modifying returned set does not affect config."""
+        patterns = {"**/generated/**"}
+        config = Configuration(
+            enabled=True,
+            base_branches=["main"],
+            tracked_extensions={".py"},
+            enable_logging=False,
+            log_file="test.log",
+            code_generated_patterns=patterns,
+        )
+        returned = config.code_generated_patterns
+        returned.add("**/__generated__/**")
+        assert "**/__generated__/**" not in config.code_generated_patterns
+
+
+class TestConfigurationLoaderCodeGeneratedPatterns:
+    """Tests for ConfigurationLoader loading code_generated_patterns."""
+
+    def test_default_config_has_code_generated_patterns(self):
+        """DEFAULT_CONFIG includes code_generated_patterns list."""
+        assert 'code_generated_patterns' in ConfigurationLoader.DEFAULT_CONFIG
+        patterns = ConfigurationLoader.DEFAULT_CONFIG['code_generated_patterns']
+        assert isinstance(patterns, list)
+        assert '**/generated/**' in patterns
+
+    def test_load_with_custom_patterns(self, tmp_path):
+        """Given config with code_generated_patterns, loads correctly as set."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "enabled": True,
+            "base_branches": ["main"],
+            "tracked_extensions": [".py"],
+            "enable_logging": False,
+            "log_file": "test.log",
+            "code_generated_patterns": ["**/custom/**", "**/*.gen.ts"],
+        }))
+        config = ConfigurationLoader.load(config_file)
+        assert config.code_generated_patterns == {"**/custom/**", "**/*.gen.ts"}
+
+    def test_load_without_patterns_falls_back_to_default(self, tmp_path):
+        """Given config without code_generated_patterns, falls back to default list."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "enabled": True,
+            "base_branches": ["main"],
+            "tracked_extensions": [".py"],
+            "enable_logging": False,
+            "log_file": "test.log",
+        }))
+        config = ConfigurationLoader.load(config_file)
+        assert '**/generated/**' in config.code_generated_patterns
+
+    def test_load_with_empty_patterns_list(self, tmp_path):
+        """Given code_generated_patterns=[], loads as empty set."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "enabled": True,
+            "base_branches": ["main"],
+            "tracked_extensions": [".py"],
+            "enable_logging": False,
+            "log_file": "test.log",
+            "code_generated_patterns": [],
+        }))
+        config = ConfigurationLoader.load(config_file)
+        assert config.code_generated_patterns == set()

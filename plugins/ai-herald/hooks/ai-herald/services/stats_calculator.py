@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import Dict, Set
 from domain.tracking_data import TrackingData
 from domain.diff import Diff
-from domain.contribution_stats import ContributionStats, FileTypeStats, LineStats, ContributorStats
+from domain.contribution_stats import CodeGenStats, ContributionStats, FileTypeStats, LineStats, ContributorStats
+from domain.generated_code_detector import GeneratedCodeDetector
 from domain.line_hasher import LineHasher
 
 
@@ -14,15 +15,17 @@ class StatsCalculator:
     Pure calculation logic with no I/O dependencies.
     """
 
-    def __init__(self, hasher: LineHasher, tracked_extensions: Set[str]):
+    def __init__(self, hasher: LineHasher, tracked_extensions: Set[str], generated_code_detector: GeneratedCodeDetector):
         """Initialize stats calculator.
 
         Args:
             hasher: LineHasher instance for consistent hashing
             tracked_extensions: Set of file extensions to include in stats (e.g. {'.py', '.java'})
+            generated_code_detector: Detector for code-generated files (excluded from AI/Human %)
         """
         self._hasher = hasher
         self._tracked_extensions = tracked_extensions
+        self._generated_code_detector = generated_code_detector
 
     def calculate(self, tracking: TrackingData, diff: Diff) -> ContributionStats:
         """Calculate contribution statistics.
@@ -40,12 +43,26 @@ class StatsCalculator:
         total_removed = 0
         by_file_type: Dict[str, Dict] = {}
 
+        # Code-gen accumulator
+        cg_added = 0
+        cg_removed = 0
+        cg_matched_patterns: Set[str] = set()
+
         # Process each AI-tracked file (files where Write/Edit tool calls fired)
         for file_path in tracking.files_tracked:
             # Get diff for this file
             file_diff = diff.get_file_diff(file_path)
             if not file_diff:
                 # File not in diff (unchanged)
+                continue
+
+            # Route code-generated files to the code-gen bucket
+            if self._generated_code_detector.is_generated(file_path):
+                cg_matched_patterns.update(self._generated_code_detector.matched_patterns(file_path))
+                cg_add = len([l for l in file_diff.added_lines if self._hasher.normalize(l)])
+                cg_rem = len([l for l in file_diff.removed_lines if self._hasher.normalize(l)])
+                cg_added += cg_add
+                cg_removed += cg_rem
                 continue
 
             # Count AI vs human lines for additions
@@ -100,6 +117,17 @@ class StatsCalculator:
                 continue
             if Path(file_path).suffix.lower() not in self._tracked_extensions:
                 continue
+
+            # Route code-generated files to the code-gen bucket
+            if self._generated_code_detector.is_generated(file_path):
+                cg_matched_patterns.update(self._generated_code_detector.matched_patterns(file_path))
+                file_diff = diff.get_file_diff(file_path)
+                cg_add = len([l for l in file_diff.added_lines if self._hasher.normalize(l)])
+                cg_rem = len([l for l in file_diff.removed_lines if self._hasher.normalize(l)])
+                cg_added += cg_add
+                cg_removed += cg_rem
+                continue
+
             file_diff = diff.get_file_diff(file_path)
             _, added_count = self._count_file_lines(file_path, file_diff.added_lines, tracking)
 
@@ -195,10 +223,18 @@ class StatsCalculator:
                 file_count=file_count
             )
 
+        code_gen_stats = CodeGenStats(
+            total=cg_added + cg_removed,
+            added=cg_added,
+            removed=cg_removed,
+            matched_patterns=frozenset(cg_matched_patterns),
+        )
+
         return ContributionStats(
             ai_stats=ai_stats,
             human_stats=human_stats,
-            by_file_type=file_type_stats
+            by_file_type=file_type_stats,
+            code_generated=code_gen_stats,
         )
 
     def _count_file_lines(
