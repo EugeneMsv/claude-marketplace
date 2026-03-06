@@ -281,8 +281,37 @@ class ConfigurationLoader:
         return ConfigurationLoader.GLOBAL_DIR / config.log_file
 
     @staticmethod
+    def _merge_defaults(user: dict, defaults: dict) -> tuple:
+        """Recursively fill missing keys in user config from defaults.
+
+        Only adds keys absent from user config. Existing values (including
+        False, None, [], {}) are never modified.
+
+        Args:
+            user: User's config dict (modified in place)
+            defaults: Default config dict to fill from
+
+        Returns:
+            Tuple of (merged_dict, was_changed) where was_changed indicates
+            whether any keys were added.
+        """
+        changed = False
+        for key, default_value in defaults.items():
+            if key not in user:
+                user[key] = default_value
+                changed = True
+            elif isinstance(default_value, dict) and isinstance(user[key], dict):
+                _, nested_changed = ConfigurationLoader._merge_defaults(user[key], default_value)
+                changed = changed or nested_changed
+        return user, changed
+
+    @staticmethod
     def load(config_path: Path = None) -> Configuration:
         """Load configuration from file, creating default if missing.
+
+        If the file exists but is missing keys present in DEFAULT_CONFIG,
+        those keys are filled with defaults and the file is updated on disk.
+        Existing values are never modified.
 
         Args:
             config_path: Path to config.json. If None, uses global path.
@@ -303,6 +332,17 @@ class ConfigurationLoader:
                 config_dict = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             config_dict = ConfigurationLoader.DEFAULT_CONFIG
+
+        # Forward-fill any missing keys from defaults and persist if changed
+        config_dict, was_changed = ConfigurationLoader._merge_defaults(
+            config_dict, ConfigurationLoader.DEFAULT_CONFIG
+        )
+        if was_changed:
+            try:
+                with open(config_path, 'w') as f:
+                    json.dump(config_dict, f, indent=2)
+            except IOError:
+                pass  # Silently fail if can't write
 
         # Load format detection settings with defaults
         default_format = ConfigurationLoader.DEFAULT_CONFIG['format_detection']

@@ -233,7 +233,9 @@ $HOME/.claude/ai-herald/config.json
 $HOME/.claude/ai-herald/ai-herald.log
 ```
 
-The directory is created automatically if it doesn't exist. This path is stable regardless of how the herald is installed (direct or marketplace plugin).
+The directory and a default `config.json` are created automatically on first run.
+
+**Config auto-update**: On every load, ai-herald checks your `config.json` for keys present in the current defaults but missing from your file. Any missing keys are silently filled with their default values and written back to disk. Keys you have explicitly set — including `false`, `null`, or `[]` — are never modified. When you upgrade ai-herald, new configuration entries may appear in your file; this is intentional and lets you discover new features and their defaults at a glance.
 
 **Version Prefix**: Hook output messages include the plugin version in the prefix (e.g., `[ai-herald:0.0.14]`). When installed as a marketplace plugin, the version is read from `.claude-plugin/plugin.json` via `CLAUDE_PLUGIN_ROOT`. For direct installations, the prefix shows `[ai-herald:dev]`.
 
