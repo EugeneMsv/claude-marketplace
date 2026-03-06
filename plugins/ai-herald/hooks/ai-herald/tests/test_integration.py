@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from services.capture_service import CaptureService
 from services.stats_calculator import StatsCalculator
-from domain.generated_code_detector import GeneratedCodeDetector
+from domain.ignored_files_detector import IgnoredFilesDetector
 from domain.tracking_data import TrackingData
 from domain.diff import Diff, DiffFile
 from domain.line_hasher import LineHasher
@@ -69,7 +69,7 @@ class TestCaptureToStats:
     ):
         """Given Edit with duplicate lines, full pipeline tracks and calculates correctly."""
         # Setup
-        no_op_detector = GeneratedCodeDetector(set())
+        no_op_detector = IgnoredFilesDetector(set())
         capture_service = CaptureService(git_repo, config, hasher, logger, WriteSnapshotRepository(temp_dir), no_op_detector)
         stats_calculator = StatsCalculator(hasher, config.tracked_extensions, no_op_detector)
 
@@ -136,7 +136,7 @@ class TestCaptureToStats:
         self, temp_dir, hasher, git_repo, config, logger
     ):
         """Given duplicate lines with partial tracking, stats calculated correctly."""
-        stats_calculator = StatsCalculator(hasher, config.tracked_extensions, GeneratedCodeDetector(set()))
+        stats_calculator = StatsCalculator(hasher, config.tracked_extensions, IgnoredFilesDetector(set()))
 
         # Tracking data: track only 2 occurrences of "line A"
         tracking = TrackingData("test-branch")
@@ -208,7 +208,7 @@ class TestMigration:
         assert ai_hashes[line_b_hash] == 1
 
         # Calculate stats
-        stats_calculator = StatsCalculator(hasher, tracked_extensions, GeneratedCodeDetector(set()))
+        stats_calculator = StatsCalculator(hasher, tracked_extensions, IgnoredFilesDetector(set()))
         diff = Diff(
             merge_base="commit123",
             files={
@@ -277,7 +277,7 @@ class TestEndToEnd:
     ):
         """Test complete workflow: Write → Capture → Storage → Stats."""
         # Create services
-        no_op_detector = GeneratedCodeDetector(set())
+        no_op_detector = IgnoredFilesDetector(set())
         capture_service = CaptureService(git_repo, config, hasher, logger, WriteSnapshotRepository(temp_dir), no_op_detector)
         stats_calculator = StatsCalculator(hasher, config.tracked_extensions, no_op_detector)
         tracking_repo = TrackingRepository(temp_dir, "test-branch")

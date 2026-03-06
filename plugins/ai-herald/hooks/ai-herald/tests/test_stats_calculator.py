@@ -7,7 +7,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from services.stats_calculator import StatsCalculator
-from domain.generated_code_detector import GeneratedCodeDetector
+from domain.ignored_files_detector import IgnoredFilesDetector
 from domain.tracking_data import TrackingData
 from domain.diff import Diff, DiffFile
 from domain.line_hasher import LineHasher
@@ -20,8 +20,8 @@ def hasher():
 
 @pytest.fixture
 def no_op_detector():
-    """GeneratedCodeDetector that never matches anything."""
-    return GeneratedCodeDetector(set())
+    """IgnoredFilesDetector that never matches anything."""
+    return IgnoredFilesDetector(set())
 
 
 @pytest.fixture
@@ -373,12 +373,12 @@ class TestCalculateHumanOnlyFiles:
         assert stats.ai_stats.removed.lines == 0
 
 
-class TestCalculateCodeGenRouting:
-    """Tests for code-generated file routing in StatsCalculator."""
+class TestCalculateIgnoredFilesRouting:
+    """Tests for ignored file routing in StatsCalculator."""
 
-    def test_code_gen_file_excluded_from_ai_human_totals(self, hasher, tracking):
-        """Given an AI-tracked file matching a code-gen pattern, it goes to code-gen bucket."""
-        detector = GeneratedCodeDetector({"**/generated/**"})
+    def test_ignored_file_excluded_from_ai_human_totals(self, hasher, tracking):
+        """Given an AI-tracked file matching an ignored pattern, it goes to ignored bucket."""
+        detector = IgnoredFilesDetector({"**/generated/**"})
         calculator = StatsCalculator(hasher, {'.java'}, detector)
         tracking.add_ai_lines("src/generated/Foo.java", ["line A", "line B"], hasher)
         tracking.track_file("src/generated/Foo.java")
@@ -393,14 +393,14 @@ class TestCalculateCodeGenRouting:
 
         assert stats.ai_stats.total.lines == 0
         assert stats.human_stats.total.lines == 0
-        assert stats.code_generated.total == 2
-        assert stats.code_generated.added == 2
-        assert stats.code_generated.removed == 0
-        assert "**/generated/**" in stats.code_generated.matched_patterns
+        assert stats.ignored_files.total == 2
+        assert stats.ignored_files.added == 2
+        assert stats.ignored_files.removed == 0
+        assert "**/generated/**" in stats.ignored_files.matched_patterns
 
-    def test_human_only_code_gen_file_excluded(self, hasher, tracking):
-        """Given a human-only file matching a code-gen pattern, it goes to code-gen bucket."""
-        detector = GeneratedCodeDetector({"**/generated/**"})
+    def test_human_only_ignored_file_excluded(self, hasher, tracking):
+        """Given a human-only file matching an ignored pattern, it goes to ignored bucket."""
+        detector = IgnoredFilesDetector({"**/generated/**"})
         calculator = StatsCalculator(hasher, {'.java'}, detector)
 
         diff = Diff("abc123", {
@@ -413,12 +413,12 @@ class TestCalculateCodeGenRouting:
 
         assert stats.ai_stats.total.lines == 0
         assert stats.human_stats.total.lines == 0
-        assert stats.code_generated.total == 3
-        assert "**/generated/**" in stats.code_generated.matched_patterns
+        assert stats.ignored_files.total == 3
+        assert "**/generated/**" in stats.ignored_files.matched_patterns
 
-    def test_non_code_gen_file_not_affected(self, hasher, tracking):
-        """Given a regular file, it is unaffected by the code-gen detector."""
-        detector = GeneratedCodeDetector({"**/generated/**"})
+    def test_non_ignored_file_not_affected(self, hasher, tracking):
+        """Given a regular file, it is unaffected by the ignored-files detector."""
+        detector = IgnoredFilesDetector({"**/generated/**"})
         calculator = StatsCalculator(hasher, {'.py'}, detector)
         tracking.add_ai_lines("src/main/Foo.py", ["def foo(): pass"], hasher)
         tracking.track_file("src/main/Foo.py")
@@ -430,11 +430,11 @@ class TestCalculateCodeGenRouting:
         stats = calculator.calculate(tracking, diff)
 
         assert stats.ai_stats.total.lines == 1
-        assert stats.code_generated.total == 0
+        assert stats.ignored_files.total == 0
 
-    def test_mixed_regular_and_code_gen_files(self, hasher, tracking):
-        """Given mixed files, code-gen lines excluded from AI/human denominator."""
-        detector = GeneratedCodeDetector({"**/generated/**"})
+    def test_mixed_regular_and_ignored_files(self, hasher, tracking):
+        """Given mixed files, ignored lines excluded from AI/human denominator."""
+        detector = IgnoredFilesDetector({"**/generated/**"})
         calculator = StatsCalculator(hasher, {'.java'}, detector)
 
         tracking.add_ai_lines("src/main/Service.java", ["line A"], hasher)
@@ -449,11 +449,11 @@ class TestCalculateCodeGenRouting:
 
         assert stats.ai_stats.total.lines == 1
         assert stats.human_stats.total.lines == 0
-        assert stats.code_generated.total == 2
+        assert stats.ignored_files.total == 2
 
-    def test_code_gen_removals_tracked_in_code_gen_bucket(self, hasher, tracking):
-        """Given code-gen file with removed lines, removals go to code-gen bucket."""
-        detector = GeneratedCodeDetector({"**/generated/**"})
+    def test_ignored_removals_tracked_in_ignored_bucket(self, hasher, tracking):
+        """Given ignored file with removed lines, removals go to ignored bucket."""
+        detector = IgnoredFilesDetector({"**/generated/**"})
         calculator = StatsCalculator(hasher, {'.java'}, detector)
 
         diff = Diff("abc123", {
@@ -462,13 +462,13 @@ class TestCalculateCodeGenRouting:
 
         stats = calculator.calculate(tracking, diff)
 
-        assert stats.code_generated.removed == 1
+        assert stats.ignored_files.removed == 1
         assert stats.ai_stats.removed.lines == 0
         assert stats.human_stats.removed.lines == 0
 
     def test_no_detector_patterns_routes_all_to_ai_human(self, hasher, tracking):
-        """Given empty pattern set, no files routed to code-gen bucket."""
-        detector = GeneratedCodeDetector(set())
+        """Given empty pattern set, no files routed to ignored bucket."""
+        detector = IgnoredFilesDetector(set())
         calculator = StatsCalculator(hasher, {'.java'}, detector)
 
         diff = Diff("abc123", {
@@ -477,5 +477,5 @@ class TestCalculateCodeGenRouting:
 
         stats = calculator.calculate(tracking, diff)
 
-        assert stats.code_generated.total == 0
+        assert stats.ignored_files.total == 0
         assert stats.human_stats.total.lines == 1

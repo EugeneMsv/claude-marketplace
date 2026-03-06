@@ -4,15 +4,15 @@ from pathlib import Path
 from typing import Dict, Set
 from domain.tracking_data import TrackingData
 from domain.diff import Diff
-from domain.contribution_stats import CodeGenStats, ContributionStats, FileTypeStats, LineStats, ContributorStats
-from domain.generated_code_detector import GeneratedCodeDetector
+from domain.contribution_stats import IgnoredFilesStats, ContributionStats, FileTypeStats, LineStats, ContributorStats
+from domain.ignored_files_detector import IgnoredFilesDetector
 from domain.line_hasher import LineHasher
 
 
-class _CodeGenAccumulator:
-    """Mutable accumulator for code-generated file stats."""
+class _IgnoredFilesAccumulator:
+    """Mutable accumulator for ignored file stats."""
 
-    def __init__(self, hasher: LineHasher, detector: GeneratedCodeDetector):
+    def __init__(self, hasher: LineHasher, detector: IgnoredFilesDetector):
         self._hasher = hasher
         self._detector = detector
         self._added = 0
@@ -24,8 +24,8 @@ class _CodeGenAccumulator:
         self._added += len([l for l in file_diff.added_lines if self._hasher.normalize(l)])
         self._removed += len([l for l in file_diff.removed_lines if self._hasher.normalize(l)])
 
-    def build_code_gen_stats(self) -> CodeGenStats:
-        return CodeGenStats(
+    def build_ignored_files_stats(self) -> IgnoredFilesStats:
+        return IgnoredFilesStats(
             total=self._added + self._removed,
             added=self._added,
             removed=self._removed,
@@ -119,17 +119,17 @@ class StatsCalculator:
     Pure calculation logic with no I/O dependencies.
     """
 
-    def __init__(self, hasher: LineHasher, tracked_extensions: Set[str], generated_code_detector: GeneratedCodeDetector):
+    def __init__(self, hasher: LineHasher, tracked_extensions: Set[str], ignored_files_detector: IgnoredFilesDetector):
         """Initialize stats calculator.
 
         Args:
             hasher: LineHasher instance for consistent hashing
             tracked_extensions: Set of file extensions to include in stats (e.g. {'.py', '.java'})
-            generated_code_detector: Detector for code-generated files (excluded from AI/Human %)
+            ignored_files_detector: Detector for ignored files (excluded from AI/Human %)
         """
         self._hasher = hasher
         self._tracked_extensions = tracked_extensions
-        self._generated_code_detector = generated_code_detector
+        self._ignored_files_detector = ignored_files_detector
 
     def calculate(self, tracking: TrackingData, diff: Diff) -> ContributionStats:
         """Calculate contribution statistics.
@@ -141,7 +141,7 @@ class StatsCalculator:
         Returns:
             ContributionStats object with aggregated statistics
         """
-        code_gen_acc = _CodeGenAccumulator(self._hasher, self._generated_code_detector)
+        ignored_acc = _IgnoredFilesAccumulator(self._hasher, self._ignored_files_detector)
         contributor_acc = _ContributorAccumulator()
         ai_tracked = set(tracking.files_tracked)
         all_files = ai_tracked | set(diff.get_changed_files())
@@ -153,8 +153,8 @@ class StatsCalculator:
             # Extension filter only needed for files AI never touched
             if file_path not in ai_tracked and self._file_ext(file_path) not in self._tracked_extensions:
                 continue
-            if self._generated_code_detector.is_generated(file_path):
-                code_gen_acc.accumulate(file_path, file_diff)
+            if self._ignored_files_detector.is_ignored(file_path):
+                ignored_acc.accumulate(file_path, file_diff)
                 continue
             ai_added, total_added = self._count_file_lines(file_path, file_diff.added_lines, tracking)
             ai_removed, total_removed = self._count_file_removals(file_path, file_diff.removed_lines, tracking)
@@ -168,7 +168,7 @@ class StatsCalculator:
             ai_stats=contributor_acc.build_ai_stats(),
             human_stats=contributor_acc.build_human_stats(),
             by_file_type=contributor_acc.build_file_type_stats(diff),
-            code_generated=code_gen_acc.build_code_gen_stats(),
+            ignored_files=ignored_acc.build_ignored_files_stats(),
         )
 
     @staticmethod

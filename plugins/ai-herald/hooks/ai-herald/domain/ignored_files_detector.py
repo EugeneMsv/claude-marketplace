@@ -1,12 +1,12 @@
-"""Generated code detection domain object."""
+"""Ignored files detection domain object."""
 
 import fnmatch
 from pathlib import Path
 from typing import Dict, Set, Union
 
 
-class GeneratedCodeDetector:
-    """Detects whether a file path matches code-generated glob patterns.
+class IgnoredFilesDetector:
+    """Detects whether a file path matches ignored-files glob patterns.
 
     Uses Python's fnmatch for matching. Since fnmatch treats '*' as matching
     any character including '/', patterns like '**/generated/**' correctly match
@@ -22,12 +22,12 @@ class GeneratedCodeDetector:
         """
         self._patterns = set(patterns)
         # Pre-build fallback patterns — strip leading '**/' for root-level paths.
-        # Avoids slicing on every is_generated() call.
+        # Avoids slicing on every is_ignored() call.
         self._fallbacks: Dict[str, str] = {
             p: p[3:] for p in self._patterns if p.startswith('**/')
         }
 
-    def is_generated(self, path: Union[str, Path]) -> bool:
+    def is_ignored(self, path: Union[str, Path]) -> bool:
         """Return True on the first pattern match (short-circuit).
 
         Args:
@@ -51,7 +51,7 @@ class GeneratedCodeDetector:
         """Return all patterns that matched the given path.
 
         Performs a full scan (no short-circuit). Used by StatsCalculator to
-        record which patterns contributed to the code-gen bucket.
+        record which patterns contributed to the ignored-files bucket.
 
         Args:
             path: File path to check

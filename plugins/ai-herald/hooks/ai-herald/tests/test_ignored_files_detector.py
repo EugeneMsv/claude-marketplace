@@ -1,4 +1,4 @@
-"""Tests for GeneratedCodeDetector."""
+"""Tests for IgnoredFilesDetector."""
 
 import sys
 from pathlib import Path
@@ -6,15 +6,15 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from domain.generated_code_detector import GeneratedCodeDetector
+from domain.ignored_files_detector import IgnoredFilesDetector
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _detector(*patterns: str) -> GeneratedCodeDetector:
-    return GeneratedCodeDetector(set(patterns))
+def _detector(*patterns: str) -> IgnoredFilesDetector:
+    return IgnoredFilesDetector(set(patterns))
 
 
 # ---------------------------------------------------------------------------
@@ -49,10 +49,10 @@ class TestGeneratedDirPattern:
         # Dirname with generated as prefix
         ("somefolder/generated_utils/Foo.java", False),
     ])
-    def test_is_generated(self, path, expected):
-        """Given path and **/generated/** pattern, is_generated returns expected."""
+    def test_is_ignored(self, path, expected):
+        """Given path and **/generated/** pattern, is_ignored returns expected."""
         detector = _detector(self.PATTERN)
-        assert detector.is_generated(path) is expected
+        assert detector.is_ignored(path) is expected
 
 
 # ---------------------------------------------------------------------------
@@ -76,10 +76,10 @@ class TestGeneratedExtensionPattern:
         # Different extension
         ("src/api/Foo.generated.js", False),
     ])
-    def test_is_generated(self, path, expected):
-        """Given path and **/*.generated.ts pattern, is_generated returns expected."""
+    def test_is_ignored(self, path, expected):
+        """Given path and **/*.generated.ts pattern, is_ignored returns expected."""
         detector = _detector(self.PATTERN)
-        assert detector.is_generated(path) is expected
+        assert detector.is_ignored(path) is expected
 
 
 # ---------------------------------------------------------------------------
@@ -101,10 +101,10 @@ class TestPb2SuffixPattern:
         # Different suffix
         ("proto/foo_pb2_grpc.py", False),
     ])
-    def test_is_generated(self, path, expected):
-        """Given path and **/*_pb2.py pattern, is_generated returns expected."""
+    def test_is_ignored(self, path, expected):
+        """Given path and **/*_pb2.py pattern, is_ignored returns expected."""
         detector = _detector(self.PATTERN)
-        assert detector.is_generated(path) is expected
+        assert detector.is_ignored(path) is expected
 
 
 # ---------------------------------------------------------------------------
@@ -128,10 +128,10 @@ class TestBuildGeneratedPattern:
         # Generated at root, not under build
         ("generated/Foo.java", False),
     ])
-    def test_is_generated(self, path, expected):
-        """Given path and **/build/generated/** pattern, is_generated returns expected."""
+    def test_is_ignored(self, path, expected):
+        """Given path and **/build/generated/** pattern, is_ignored returns expected."""
         detector = _detector(self.PATTERN)
-        assert detector.is_generated(path) is expected
+        assert detector.is_ignored(path) is expected
 
 
 # ---------------------------------------------------------------------------
@@ -165,35 +165,35 @@ class TestMatchedPatterns:
 # ---------------------------------------------------------------------------
 
 class TestEdgeCases:
-    """Edge cases for GeneratedCodeDetector."""
+    """Edge cases for IgnoredFilesDetector."""
 
-    def test_empty_pattern_set_is_generated_returns_false(self):
-        """Given empty pattern set, is_generated returns False."""
-        detector = GeneratedCodeDetector(set())
-        assert detector.is_generated("generated/Foo.java") is False
+    def test_empty_pattern_set_is_ignored_returns_false(self):
+        """Given empty pattern set, is_ignored returns False."""
+        detector = IgnoredFilesDetector(set())
+        assert detector.is_ignored("generated/Foo.java") is False
 
     def test_empty_pattern_set_matched_patterns_returns_empty(self):
         """Given empty pattern set, matched_patterns returns empty set."""
-        detector = GeneratedCodeDetector(set())
+        detector = IgnoredFilesDetector(set())
         assert detector.matched_patterns("generated/Foo.java") == set()
 
     def test_path_with_no_extension_matches_dir_pattern(self):
         """Given path with no extension inside generated/, matches dir pattern."""
         detector = _detector("**/generated/**")
-        assert detector.is_generated("generated/MAKEFILE") is True
+        assert detector.is_ignored("generated/MAKEFILE") is True
 
     def test_windows_style_path_normalized_to_forward_slash(self):
         """Given Windows-style backslash path, normalizes to / before matching."""
         detector = _detector("**/generated/**")
-        assert detector.is_generated("src\\generated\\Foo.java") is True
+        assert detector.is_ignored("src\\generated\\Foo.java") is True
 
-    def test_is_generated_short_circuits_on_first_match(self):
+    def test_is_ignored_short_circuits_on_first_match(self):
         """Given multiple patterns where first matches, returns True without checking rest."""
         detector = _detector("**/generated/**", "**/__generated__/**")
         # Both could match but should return True on first match
-        assert detector.is_generated("src/generated/Foo.java") is True
+        assert detector.is_ignored("src/generated/Foo.java") is True
 
     def test_path_object_accepted(self):
-        """Given a Path object, is_generated works correctly."""
+        """Given a Path object, is_ignored works correctly."""
         detector = _detector("**/generated/**")
-        assert detector.is_generated(Path("src/generated/Foo.java")) is True
+        assert detector.is_ignored(Path("src/generated/Foo.java")) is True

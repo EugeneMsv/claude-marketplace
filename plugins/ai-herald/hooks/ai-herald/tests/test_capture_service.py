@@ -11,7 +11,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from services.capture_service import CaptureService
-from domain.generated_code_detector import GeneratedCodeDetector
+from domain.ignored_files_detector import IgnoredFilesDetector
 from domain.line_hasher import LineHasher
 from domain.tracking_data import TrackingData
 from infrastructure.tracking_repository import TrackingRepository
@@ -166,7 +166,7 @@ def _make_service(git_root: Path, branch: str = "feature/test", tracked_ext=".py
     logger = logging.getLogger("test")
     snapshot_repo = WriteSnapshotRepository(git_root)
 
-    return CaptureService(git_repo, config, hasher, logger, snapshot_repo, GeneratedCodeDetector(set()))
+    return CaptureService(git_repo, config, hasher, logger, snapshot_repo, IgnoredFilesDetector(set()))
 
 
 class TestStorePreWriteSnapshot:
@@ -344,8 +344,8 @@ class TestProcessEdit:
             assert result is False
 
 
-def _make_service_with_detector(git_root: Path, detector: GeneratedCodeDetector, branch: str = "feature/test") -> CaptureService:
-    """Build CaptureService with a custom GeneratedCodeDetector."""
+def _make_service_with_detector(git_root: Path, detector: IgnoredFilesDetector, branch: str = "feature/test") -> CaptureService:
+    """Build CaptureService with a custom IgnoredFilesDetector."""
     git_repo = MagicMock()
     git_repo.get_root.return_value = git_root
     git_repo.get_current_branch.return_value = branch
@@ -361,15 +361,15 @@ def _make_service_with_detector(git_root: Path, detector: GeneratedCodeDetector,
     return CaptureService(git_repo, config, hasher, logger, snapshot_repo, detector)
 
 
-class TestProcessSkipsCodeGenFiles:
-    """Tests that CaptureService skips code-generated files."""
+class TestProcessSkipsIgnoredFiles:
+    """Tests that CaptureService skips ignored files."""
 
-    def test_write_to_code_gen_file_returns_false(self):
-        """Given Write to a code-generated file, returns False without tracking."""
+    def test_write_to_ignored_file_returns_false(self):
+        """Given Write to an ignored file, returns False without tracking."""
         with tempfile.TemporaryDirectory() as tmpdir:
             git_root = Path(tmpdir)
             (git_root / ".claude").mkdir()
-            detector = GeneratedCodeDetector({"**/generated/**"})
+            detector = IgnoredFilesDetector({"**/generated/**"})
             service = _make_service_with_detector(git_root, detector)
 
             tool_input = {
@@ -383,12 +383,12 @@ class TestProcessSkipsCodeGenFiles:
             tracking_repo = TrackingRepository(git_root, "feature-test")
             assert tracking_repo.load() is None
 
-    def test_edit_to_code_gen_file_returns_false(self):
-        """Given Edit to a code-generated file, returns False without tracking."""
+    def test_edit_to_ignored_file_returns_false(self):
+        """Given Edit to an ignored file, returns False without tracking."""
         with tempfile.TemporaryDirectory() as tmpdir:
             git_root = Path(tmpdir)
             (git_root / ".claude").mkdir()
-            detector = GeneratedCodeDetector({"**/generated/**"})
+            detector = IgnoredFilesDetector({"**/generated/**"})
             service = _make_service_with_detector(git_root, detector)
 
             tool_input = {
@@ -401,11 +401,11 @@ class TestProcessSkipsCodeGenFiles:
             assert result is False
 
     def test_write_to_regular_file_not_affected(self):
-        """Given Write to a non-code-gen file, it is tracked normally."""
+        """Given Write to a non-ignored file, it is tracked normally."""
         with tempfile.TemporaryDirectory() as tmpdir:
             git_root = Path(tmpdir)
             (git_root / ".claude").mkdir()
-            detector = GeneratedCodeDetector({"**/generated/**"})
+            detector = IgnoredFilesDetector({"**/generated/**"})
             service = _make_service_with_detector(git_root, detector)
 
             tool_input = {

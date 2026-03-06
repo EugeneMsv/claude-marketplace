@@ -51,7 +51,7 @@ Before using AI Herald, ensure the following requirements are met:
 - **Missed Commit Recovery**: Automatically recovers AI stats injection for commits made inside chained commands that partially failed (e.g. `git add && git commit && git push` where push fails)
 - **Bash Deletion Tracking**: When AI runs `rm`, `git rm`, or `unlink` via the Bash tool, all removed lines from the deleted file are attributed to AI automatically
 - **Automatic Housekeeping**: Cleans up stale tracking files for deleted/merged branches
-- **Code-Gen Exclusion**: Files matching configurable Ant-style glob patterns (e.g. `**/generated/**`) are tracked separately as Code-Gen and excluded from AI/Human percentages
+- **Ignored Files Exclusion**: Files matching configurable Ant-style glob patterns (e.g. `**/generated/**`) are tracked separately as Ignored and excluded from AI/Human percentages
 - **Configurable**: Support for multiple base branches, file extensions, and logging
 
 ## Current Limitations
@@ -89,9 +89,9 @@ Before using AI Herald, ensure the following requirements are met:
   and over-attribute, or an unusually aggressive reformat may fall below it and lose attribution.
   Small discrepancies between tracked and actual AI contribution after formatting are a known
   trade-off.
-- **Code-generated files are not attributed**: Files matching `code_generated_patterns` are excluded
+- **Ignored files are not attributed**: Files matching `ignored_paths` are excluded
   from both AI and human attribution entirely. Their line counts appear separately in commit stats
-  under `Code-Gen:` but do not affect AI/Human percentages. This is intentional — generated files
+  under `Ignored:` but do not affect AI/Human percentages. This is intentional — generated files
   (protobuf outputs, GraphQL clients, build artifacts) skew percentages and should not be
   attributed to either contributor.
 - **MR updates skipped when piped push returns exit code 1**: When `git push` runs as part of a
@@ -251,18 +251,8 @@ Edit `config.json` to customize:
   ],
   "enable_logging": true,
   "log_file": "ai-herald.log",
-  "code_generated_patterns": [
-    "**/generated/**",
-    "**/__generated__/**",
-    "**/gen/**",
-    "**/*.generated.ts",
-    "**/*.generated.js",
-    "**/*.generated.java",
-    "**/*.pb.go",
-    "**/*_pb2.py",
-    "**/*_pb2_grpc.py",
-    "**/build/generated/**",
-    "**/target/generated-sources/**"
+  "ignored_paths": [
+    "**/generated/**"
   ],
   "mr": {
     "titleUpdateEnabled": false,
@@ -292,7 +282,7 @@ Edit `config.json` to customize:
 - `housekeeping.enabled` - Automatically clean up stale tracking files (default: true)
 - `housekeeping.staleDaysThreshold` - Days before a tracking file is considered stale (default: 7)
 - `housekeeping.maxFilesPerRun` - Maximum files to process per commit for performance (default: 5)
-- `code_generated_patterns` - List of Ant-style glob patterns for code-generated files; matched files are excluded from AI/Human percentages and reported separately under `Code-Gen:` in commit stats. Uses `fnmatch` matching where `*` matches any character including `/`. To disable exclusion entirely, set to `[]`. Default patterns cover protobuf outputs, GraphQL clients, and common build-tool generated directories.
+- `ignored_paths` - List of Ant-style glob patterns for ignored files; matched files are excluded from AI/Human percentages and reported separately under `Ignored:` in commit stats. Uses `fnmatch` matching where `*` matches any character including `/`. To disable exclusion entirely, set to `[]`. Default is `["**/generated/**"]`.
 
   **Examples:**
   - `**/generated/**` — all files inside any `generated/` directory at any depth
@@ -303,7 +293,7 @@ Edit `config.json` to customize:
   **Customization:**
   ```json
   {
-    "code_generated_patterns": [
+    "ignored_paths": [
       "**/generated/**",
       "**/*.gen.go",
       "**/proto/out/**"
@@ -543,7 +533,7 @@ The tracker automatically cleans up stale tracking files for branches that have 
 - Create feature branch
 - AI adds 5 lines
 - Human adds 1 line
-- Code-generated file updated (e.g. protobuf output regenerated): 20 lines
+- Ignored file updated (e.g. protobuf output regenerated): 20 lines
 
 **Commit Message:**
 
@@ -558,12 +548,12 @@ Overall: +26 -0
     +1 (100.0%)
     -0 (0.0%)
 Tracked: .java, .py
-  Code-Gen: 20 lines (excluded from AI/Human %)
+  Ignored: 20 lines (excluded from AI/Human %)
     +20 -0
     Patterns: **/generated/**
 ```
 
-**With git diff tracking**: Shows 5 AI / 6 non-generated changes = 83.3% ✅ (code-gen lines excluded from denominator)
+**With git diff tracking**: Shows 5 AI / 6 non-ignored changes = 83.3% ✅ (ignored lines excluded from denominator)
 
 ## Why Stats Differ from Git Diff
 
@@ -650,29 +640,29 @@ def foo():
 # AI tracker still recognizes "return 1" as the same line (both strip to "return 1")
 ```
 
-### 5. Code-Generated Files are Excluded from AI/Human Totals
+### 5. Ignored Files are Excluded from AI/Human Totals
 
-Files matching `code_generated_patterns` (protobuf outputs, GraphQL clients, build artifacts) are
-counted separately under `Code-Gen:` in commit stats and are **never included** in the AI or human
+Files matching `ignored_paths` (protobuf outputs, GraphQL clients, build artifacts) are
+counted separately under `Ignored:` in commit stats and are **never included** in the AI or human
 totals. This prevents generated file churn from dominating the attribution percentage.
 
 **Example:**
 
 ```bash
 # Git diff shows 120 lines added:
-# - 100 lines in src/generated/Client.java  (code-gen pattern match)
+# - 100 lines in src/generated/Client.java  (ignored pattern match)
 # - 20  lines in src/main/Service.java      (AI-written via Write tool)
 
 # AI tracker reports:
 # - AI: 20 lines (100%) — only Service.java counted
-# - Code-Gen: 100 lines (excluded from AI/Human %)
+# - Ignored: 100 lines (excluded from AI/Human %)
 ```
 
 ### Summary
 
 **Git diff counts:** All lines in all files (including blanks, binaries, and untracked extensions)
 
-**AI tracker counts:** Non-blank lines in tracked file types — AI lines where Write/Edit hashes match, human lines for everything else, code-generated lines excluded from the AI/Human denominator
+**AI tracker counts:** Non-blank lines in tracked file types — AI lines where Write/Edit hashes match, human lines for everything else, ignored lines excluded from the AI/Human denominator
 
 This is by design to provide accurate attribution of **semantic code contributions** rather than raw line counts.
 
@@ -723,7 +713,7 @@ Per-branch tracking files are stored in `.claude/herald/{branch}.json`:
 - `herald-pre-writer.py` - Write pre-hook entry point (PreToolUse Write - snapshots file before overwrite)
 - `herald-bash-delete.py` - Bash file deletion hook entry point (PostToolUse Bash - detects `rm`/`git rm`/`unlink` and marks deleted files as AI-deleted)
 - `config.json` - Configuration
-- `domain/` - Business logic (LineHasher, Diff, TrackingData, ContributionStats, FormatSnapshot, TokenNormalizer, GeneratedCodeDetector)
+- `domain/` - Business logic (LineHasher, Diff, TrackingData, ContributionStats, FormatSnapshot, TokenNormalizer, IgnoredFilesDetector)
 - `infrastructure/` - Git, GitLab, and file operations (GitRepository, GlabRepository, TrackingRepository, Configuration)
 - `services/` - Workflow coordination (CaptureService, InjectService, MrService, StatsCalculator, FormatSnapshotService, FormatTrackerService, DeletionTrackerService, DeletionTargetsDetector)
 - `tests/` - Unit tests

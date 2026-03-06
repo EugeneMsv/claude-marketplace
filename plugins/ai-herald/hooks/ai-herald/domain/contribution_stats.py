@@ -28,8 +28,8 @@ class ContributorStats:
 
 
 @dataclass(frozen=True)
-class CodeGenStats:
-    """Statistics for code-generated files (excluded from AI/Human percentages).
+class IgnoredFilesStats:
+    """Statistics for ignored files (excluded from AI/Human percentages).
 
     Immutable value object containing line counts and the set of patterns that
     matched at least one file in the commit.
@@ -66,7 +66,7 @@ class ContributionStats:
         ai_stats: ContributorStats,
         human_stats: ContributorStats,
         by_file_type: Dict[str, FileTypeStats],
-        code_generated: CodeGenStats = None
+        ignored_files: IgnoredFilesStats = None
     ):
         """Initialize contribution statistics.
 
@@ -74,12 +74,12 @@ class ContributionStats:
             ai_stats: ContributorStats for AI contributions
             human_stats: ContributorStats for human contributions
             by_file_type: Statistics broken down by file extension
-            code_generated: Stats for code-generated files (excluded from AI/Human %)
+            ignored_files: Stats for ignored files (excluded from AI/Human %)
         """
         self._ai_stats = ai_stats
         self._human_stats = human_stats
         self._by_file_type = by_file_type.copy()
-        self._code_generated: CodeGenStats = code_generated if code_generated is not None else CodeGenStats(
+        self._ignored_files: IgnoredFilesStats = ignored_files if ignored_files is not None else IgnoredFilesStats(
             total=0, added=0, removed=0, matched_patterns=frozenset()
         )
 
@@ -116,19 +116,19 @@ class ContributionStats:
                 file_count=ft['file_count'],
             )
 
-        cg_data = data.get('code_generated', {})
-        code_generated = CodeGenStats(
-            total=cg_data.get('total', 0),
-            added=cg_data.get('added', 0),
-            removed=cg_data.get('removed', 0),
-            matched_patterns=frozenset(cg_data.get('matched_patterns', [])),
+        ig_data = data.get('ignored_files', {})
+        ignored_files = IgnoredFilesStats(
+            total=ig_data.get('total', 0),
+            added=ig_data.get('added', 0),
+            removed=ig_data.get('removed', 0),
+            matched_patterns=frozenset(ig_data.get('matched_patterns', [])),
         )
 
         return cls(
             ai_stats=ai_stats,
             human_stats=human_stats,
             by_file_type=by_file_type,
-            code_generated=code_generated,
+            ignored_files=ignored_files,
         )
 
     @property
@@ -162,9 +162,9 @@ class ContributionStats:
         return self._ai_stats.total.percentage
 
     @property
-    def code_generated(self) -> CodeGenStats:
-        """Get code-generated file statistics."""
-        return self._code_generated
+    def ignored_files(self) -> IgnoredFilesStats:
+        """Get ignored file statistics."""
+        return self._ignored_files
 
     @property
     def by_file_type(self) -> Dict[str, FileTypeStats]:
@@ -223,11 +223,11 @@ class ContributionStats:
                 }
                 for ext, stats in self._by_file_type.items()
             },
-            'code_generated': {
-                'total': self._code_generated.total,
-                'added': self._code_generated.added,
-                'removed': self._code_generated.removed,
-                'matched_patterns': sorted(self._code_generated.matched_patterns),
+            'ignored_files': {
+                'total': self._ignored_files.total,
+                'added': self._ignored_files.added,
+                'removed': self._ignored_files.removed,
+                'matched_patterns': sorted(self._ignored_files.matched_patterns),
             }
         }
 
@@ -285,12 +285,12 @@ class ContributionStats:
         if tracked:
             msg += f"\n{tracked}"
 
-        # Append code-gen section when there are code-generated lines
-        if self._code_generated.total > 0:
-            msg += f"\n  Code-Gen: {self._code_generated.total} lines excluded"
-            msg += f"\n    +{self._code_generated.added} -{self._code_generated.removed}"
-            if self._code_generated.matched_patterns:
-                patterns_str = ", ".join(sorted(self._code_generated.matched_patterns))
+        # Append ignored-files section when there are ignored lines
+        if self._ignored_files.total > 0:
+            msg += f"\n  Ignored: {self._ignored_files.total} lines excluded"
+            msg += f"\n    +{self._ignored_files.added} -{self._ignored_files.removed}"
+            if self._ignored_files.matched_patterns:
+                patterns_str = ", ".join(sorted(self._ignored_files.matched_patterns))
                 msg += f"\n    Matched patterns: {patterns_str}"
 
         return msg

@@ -8,7 +8,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from domain.contribution_stats import (
-    CodeGenStats,
+    IgnoredFilesStats,
     ContributionStats,
     ContributorStats,
     FileTypeStats,
@@ -271,11 +271,11 @@ def test_format_message_tracked_extensions_sorted():
 
 
 # ---------------------------------------------------------------------------
-# CodeGenStats tests
+# IgnoredFilesStats tests
 # ---------------------------------------------------------------------------
 
-class TestCodeGenStatsDefault:
-    """Tests for default code_generated field in ContributionStats."""
+class TestIgnoredFilesStatsDefault:
+    """Tests for default ignored_files field in ContributionStats."""
 
     def _make_contribution_stats(self, **kwargs) -> ContributionStats:
         ai = ContributorStats(
@@ -290,28 +290,28 @@ class TestCodeGenStatsDefault:
         )
         return ContributionStats(ai_stats=ai, human_stats=human, by_file_type={}, **kwargs)
 
-    def test_code_generated_defaults_to_zeros(self):
-        """Given no code_generated arg, code_generated has all zeros."""
+    def test_ignored_files_defaults_to_zeros(self):
+        """Given no ignored_files arg, ignored_files has all zeros."""
         stats = self._make_contribution_stats()
-        assert stats.code_generated.total == 0
-        assert stats.code_generated.added == 0
-        assert stats.code_generated.removed == 0
-        assert stats.code_generated.matched_patterns == frozenset()
+        assert stats.ignored_files.total == 0
+        assert stats.ignored_files.added == 0
+        assert stats.ignored_files.removed == 0
+        assert stats.ignored_files.matched_patterns == frozenset()
 
-    def test_code_generated_stores_given_stats(self):
-        """Given code_generated arg, property returns it."""
-        cg = CodeGenStats(total=50, added=30, removed=20, matched_patterns=frozenset({"**/generated/**"}))
-        stats = self._make_contribution_stats(code_generated=cg)
-        assert stats.code_generated.total == 50
-        assert stats.code_generated.added == 30
-        assert stats.code_generated.removed == 20
-        assert "**/generated/**" in stats.code_generated.matched_patterns
+    def test_ignored_files_stores_given_stats(self):
+        """Given ignored_files arg, property returns it."""
+        ig = IgnoredFilesStats(total=50, added=30, removed=20, matched_patterns=frozenset({"**/generated/**"}))
+        stats = self._make_contribution_stats(ignored_files=ig)
+        assert stats.ignored_files.total == 50
+        assert stats.ignored_files.added == 30
+        assert stats.ignored_files.removed == 20
+        assert "**/generated/**" in stats.ignored_files.matched_patterns
 
 
-class TestFormatMessageCodeGen:
-    """Tests for format_message() with code-gen section."""
+class TestFormatMessageIgnoredFiles:
+    """Tests for format_message() with ignored-files section."""
 
-    def _make_stats(self, cg: CodeGenStats) -> ContributionStats:
+    def _make_stats(self, ig: IgnoredFilesStats) -> ContributionStats:
         ai = ContributorStats(
             total=LineStats(lines=80, percentage=80.0),
             added=LineStats(lines=80, percentage=80.0),
@@ -322,41 +322,41 @@ class TestFormatMessageCodeGen:
             added=LineStats(lines=20, percentage=20.0),
             removed=LineStats(lines=0, percentage=0.0),
         )
-        return ContributionStats(ai_stats=ai, human_stats=human, by_file_type={}, code_generated=cg)
+        return ContributionStats(ai_stats=ai, human_stats=human, by_file_type={}, ignored_files=ig)
 
-    def test_format_message_omits_code_gen_section_when_zero(self):
-        """Given zero code-gen lines, format_message omits the Code-Gen section."""
-        cg = CodeGenStats(total=0, added=0, removed=0, matched_patterns=frozenset())
-        stats = self._make_stats(cg)
-        assert "Code-Gen" not in stats.format_message()
+    def test_format_message_omits_ignored_section_when_zero(self):
+        """Given zero ignored lines, format_message omits the Ignored section."""
+        ig = IgnoredFilesStats(total=0, added=0, removed=0, matched_patterns=frozenset())
+        stats = self._make_stats(ig)
+        assert "Ignored" not in stats.format_message()
 
-    def test_format_message_includes_code_gen_section_when_nonzero(self):
-        """Given nonzero code-gen lines, format_message appends Code-Gen section."""
-        cg = CodeGenStats(total=50, added=30, removed=20, matched_patterns=frozenset({"**/generated/**"}))
-        stats = self._make_stats(cg)
+    def test_format_message_includes_ignored_section_when_nonzero(self):
+        """Given nonzero ignored lines, format_message appends Ignored section."""
+        ig = IgnoredFilesStats(total=50, added=30, removed=20, matched_patterns=frozenset({"**/generated/**"}))
+        stats = self._make_stats(ig)
         msg = stats.format_message()
-        assert "Code-Gen: 50 lines excluded" in msg
+        assert "Ignored: 50 lines excluded" in msg
         assert "+30 -20" in msg
         assert "Matched patterns: **/generated/**" in msg
 
-    def test_format_message_code_gen_patterns_sorted(self):
+    def test_format_message_ignored_patterns_sorted(self):
         """Given multiple matched patterns, they appear sorted in format_message."""
-        cg = CodeGenStats(
+        ig = IgnoredFilesStats(
             total=50, added=50, removed=0,
             matched_patterns=frozenset({"**/generated/**", "**/build/generated/**"})
         )
-        stats = self._make_stats(cg)
+        stats = self._make_stats(ig)
         msg = stats.format_message()
         # Both patterns present, sorted alphabetically
         assert "**/build/generated/**, **/generated/**" in msg
 
 
-class TestToAndFromDictWithCodeGen:
-    """Tests for to_dict / from_dict round-trip with code_generated."""
+class TestToAndFromDictWithIgnoredFiles:
+    """Tests for to_dict / from_dict round-trip with ignored_files."""
 
-    def test_to_dict_includes_code_generated(self):
-        """Given ContributionStats with code_generated, to_dict() includes it."""
-        cg = CodeGenStats(total=40, added=25, removed=15, matched_patterns=frozenset({"**/generated/**"}))
+    def test_to_dict_includes_ignored_files(self):
+        """Given ContributionStats with ignored_files, to_dict() includes it."""
+        ig = IgnoredFilesStats(total=40, added=25, removed=15, matched_patterns=frozenset({"**/generated/**"}))
         ai = ContributorStats(
             total=LineStats(lines=60, percentage=60.0),
             added=LineStats(lines=60, percentage=60.0),
@@ -367,16 +367,16 @@ class TestToAndFromDictWithCodeGen:
             added=LineStats(lines=40, percentage=40.0),
             removed=LineStats(lines=0, percentage=0.0),
         )
-        stats = ContributionStats(ai_stats=ai, human_stats=human, by_file_type={}, code_generated=cg)
+        stats = ContributionStats(ai_stats=ai, human_stats=human, by_file_type={}, ignored_files=ig)
         d = stats.to_dict()
 
-        assert d['code_generated']['total'] == 40
-        assert d['code_generated']['added'] == 25
-        assert d['code_generated']['removed'] == 15
-        assert d['code_generated']['matched_patterns'] == ["**/generated/**"]
+        assert d['ignored_files']['total'] == 40
+        assert d['ignored_files']['added'] == 25
+        assert d['ignored_files']['removed'] == 15
+        assert d['ignored_files']['matched_patterns'] == ["**/generated/**"]
 
-    def test_from_dict_restores_code_generated(self):
-        """Given dict with code_generated, from_dict() restores it."""
+    def test_from_dict_restores_ignored_files(self):
+        """Given dict with ignored_files, from_dict() restores it."""
         data = {
             'ai': {
                 'total': {'lines': 60, 'percentage': 60.0},
@@ -388,7 +388,7 @@ class TestToAndFromDictWithCodeGen:
                 'added': {'lines': 40, 'percentage': 40.0},
                 'removed': {'lines': 0, 'percentage': 0.0},
             },
-            'code_generated': {
+            'ignored_files': {
                 'total': 40,
                 'added': 25,
                 'removed': 15,
@@ -396,12 +396,12 @@ class TestToAndFromDictWithCodeGen:
             },
         }
         stats = ContributionStats.from_dict(data)
-        assert stats.code_generated.total == 40
-        assert stats.code_generated.added == 25
-        assert "**/generated/**" in stats.code_generated.matched_patterns
+        assert stats.ignored_files.total == 40
+        assert stats.ignored_files.added == 25
+        assert "**/generated/**" in stats.ignored_files.matched_patterns
 
-    def test_from_dict_missing_code_generated_defaults_to_zeros(self):
-        """Given dict without code_generated, from_dict() defaults to zeros."""
+    def test_from_dict_missing_ignored_files_defaults_to_zeros(self):
+        """Given dict without ignored_files, from_dict() defaults to zeros."""
         data = {
             'ai': {
                 'total': {'lines': 10, 'percentage': 100.0},
@@ -415,5 +415,5 @@ class TestToAndFromDictWithCodeGen:
             },
         }
         stats = ContributionStats.from_dict(data)
-        assert stats.code_generated.total == 0
-        assert stats.code_generated.matched_patterns == frozenset()
+        assert stats.ignored_files.total == 0
+        assert stats.ignored_files.matched_patterns == frozenset()
