@@ -3,7 +3,7 @@
 import json
 import os
 from pathlib import Path
-from typing import List, Set
+from typing import List, Set, Optional
 
 
 class Configuration:
@@ -27,7 +27,8 @@ class Configuration:
         mr_labeling_enabled: bool = False,
         housekeeping_enabled: bool = False,
         housekeeping_stale_days: int = 7,
-        housekeeping_max_files: int = 5
+        housekeeping_max_files: int = 5,
+        ignored_paths: Optional[Set[str]] = None
     ):
         """Initialize configuration.
 
@@ -46,6 +47,7 @@ class Configuration:
             housekeeping_enabled: Whether housekeeping is enabled
             housekeeping_stale_days: Days threshold for stale tracking files
             housekeeping_max_files: Max files to process per housekeeping run
+            ignored_paths: Ant-style glob patterns for ignored files
         """
         self._enabled = enabled
         self._base_branches = base_branches.copy()
@@ -61,6 +63,7 @@ class Configuration:
         self._housekeeping_enabled = housekeeping_enabled
         self._housekeeping_stale_days = housekeeping_stale_days
         self._housekeeping_max_files = housekeeping_max_files
+        self._ignored_paths: Set[str] = set(ignored_paths) if ignored_paths else set()
 
         # Environment variables can override
         self._disable_env = os.environ.get('DISABLE_AI_STATS', '0') == '1'
@@ -151,6 +154,11 @@ class Configuration:
         """Get max files to process per housekeeping run."""
         return self._housekeeping_max_files
 
+    @property
+    def ignored_paths(self) -> Set[str]:
+        """Get Ant-style glob patterns for ignored files."""
+        return self._ignored_paths.copy()
+
     def is_extension_tracked(self, extension: str) -> bool:
         """Check if a file extension is tracked.
 
@@ -213,7 +221,10 @@ class ConfigurationLoader:
             'enabled': False,
             'staleDaysThreshold': 7,
             'maxFilesPerRun': 5
-        }
+        },
+        'ignored_paths': [
+            '**/generated/**'
+        ]
     }
 
     @staticmethod
@@ -260,8 +271,37 @@ class ConfigurationLoader:
         return ConfigurationLoader.GLOBAL_DIR / config.log_file
 
     @staticmethod
+    def _merge_defaults(user: dict, defaults: dict) -> tuple:
+        """Recursively fill missing keys in user config from defaults.
+
+        Only adds keys absent from user config. Existing values (including
+        False, None, [], {}) are never modified.
+
+        Args:
+            user: User's config dict (modified in place)
+            defaults: Default config dict to fill from
+
+        Returns:
+            Tuple of (merged_dict, was_changed) where was_changed indicates
+            whether any keys were added.
+        """
+        changed = False
+        for key, default_value in defaults.items():
+            if key not in user:
+                user[key] = default_value
+                changed = True
+            elif isinstance(default_value, dict) and isinstance(user[key], dict):
+                _, nested_changed = ConfigurationLoader._merge_defaults(user[key], default_value)
+                changed = changed or nested_changed
+        return user, changed
+
+    @staticmethod
     def load(config_path: Path = None) -> Configuration:
         """Load configuration from file, creating default if missing.
+
+        If the file exists but is missing keys present in DEFAULT_CONFIG,
+        those keys are filled with defaults and the file is updated on disk.
+        Existing values are never modified.
 
         Args:
             config_path: Path to config.json. If None, uses global path.
@@ -282,6 +322,17 @@ class ConfigurationLoader:
                 config_dict = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             config_dict = ConfigurationLoader.DEFAULT_CONFIG
+
+        # Forward-fill any missing keys from defaults and persist if changed
+        config_dict, was_changed = ConfigurationLoader._merge_defaults(
+            config_dict, ConfigurationLoader.DEFAULT_CONFIG
+        )
+        if was_changed:
+            try:
+                with open(config_path, 'w') as f:
+                    json.dump(config_dict, f, indent=2)
+            except IOError:
+                pass  # Silently fail if can't write
 
         # Load format detection settings with defaults
         default_format = ConfigurationLoader.DEFAULT_CONFIG['format_detection']
@@ -304,6 +355,9 @@ class ConfigurationLoader:
         housekeeping_stale_days = housekeeping_config.get('staleDaysThreshold', default_housekeeping['staleDaysThreshold'])
         housekeeping_max_files = housekeeping_config.get('maxFilesPerRun', default_housekeeping['maxFilesPerRun'])
 
+        default_ignored_paths = ConfigurationLoader.DEFAULT_CONFIG['ignored_paths']
+        ignored_paths = set(config_dict.get('ignored_paths', default_ignored_paths))
+
         return Configuration(
             enabled=config_dict.get('enabled', ConfigurationLoader.DEFAULT_CONFIG['enabled']),
             base_branches=config_dict.get('base_branches', ConfigurationLoader.DEFAULT_CONFIG['base_branches']),
@@ -318,7 +372,8 @@ class ConfigurationLoader:
             mr_labeling_enabled=mr_labeling_enabled,
             housekeeping_enabled=housekeeping_enabled,
             housekeeping_stale_days=housekeeping_stale_days,
-            housekeeping_max_files=housekeeping_max_files
+            housekeeping_max_files=housekeeping_max_files,
+            ignored_paths=ignored_paths
         )
 
     @staticmethod

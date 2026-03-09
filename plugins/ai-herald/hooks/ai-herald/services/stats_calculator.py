@@ -4,8 +4,113 @@ from pathlib import Path
 from typing import Dict, Set
 from domain.tracking_data import TrackingData
 from domain.diff import Diff
-from domain.contribution_stats import ContributionStats, FileTypeStats, LineStats, ContributorStats
+from domain.contribution_stats import IgnoredFilesStats, ContributionStats, FileTypeStats, LineStats, ContributorStats
+from domain.ignored_files_detector import IgnoredFilesDetector
 from domain.line_hasher import LineHasher
+
+
+class _IgnoredFilesAccumulator:
+    """Mutable accumulator for ignored file stats."""
+
+    def __init__(self, hasher: LineHasher, detector: IgnoredFilesDetector):
+        self._hasher = hasher
+        self._detector = detector
+        self._added = 0
+        self._removed = 0
+        self._matched_patterns: Set[str] = set()
+
+    def accumulate(self, file_path: str, file_diff) -> None:
+        self._matched_patterns.update(self._detector.matched_patterns(file_path))
+        self._added += len([l for l in file_diff.added_lines if self._hasher.normalize(l)])
+        self._removed += len([l for l in file_diff.removed_lines if self._hasher.normalize(l)])
+
+    def build_ignored_files_stats(self) -> IgnoredFilesStats:
+        return IgnoredFilesStats(
+            total=self._added + self._removed,
+            added=self._added,
+            removed=self._removed,
+            matched_patterns=frozenset(self._matched_patterns),
+        )
+
+
+class _ContributorAccumulator:
+    """Mutable accumulator for AI and human contributor stats."""
+
+    def __init__(self):
+        self._ai_added = 0
+        self._ai_removed = 0
+        self._human_added = 0
+        self._human_removed = 0
+        self._total_added = 0    # ai_added + human_added across all files
+        self._total_removed = 0  # ai_removed + human_removed across all files
+        self._by_ext: Dict[str, Dict] = {}
+
+    def add_file(self, ai_added: int, ai_removed: int, human_added: int, human_removed: int, file_ext: str) -> None:
+        self._ai_added += ai_added
+        self._ai_removed += ai_removed
+        self._human_added += human_added
+        self._human_removed += human_removed
+        self._total_added += ai_added + human_added
+        self._total_removed += ai_removed + human_removed
+        if file_ext not in self._by_ext:
+            self._by_ext[file_ext] = {'ai_added': 0, 'ai_removed': 0, 'human_added': 0, 'human_removed': 0}
+        self._by_ext[file_ext]['ai_added'] += ai_added
+        self._by_ext[file_ext]['ai_removed'] += ai_removed
+        self._by_ext[file_ext]['human_added'] += human_added
+        self._by_ext[file_ext]['human_removed'] += human_removed
+
+    def build_ai_stats(self) -> ContributorStats:
+        ai_total = self._ai_added + self._ai_removed
+        overall_total = ai_total + self._human_added + self._human_removed
+        return ContributorStats(
+            total=LineStats(
+                lines=ai_total,
+                percentage=round(ai_total / overall_total * 100, 1) if overall_total > 0 else 0.0,
+            ),
+            added=LineStats(
+                lines=self._ai_added,
+                percentage=round(self._ai_added / self._total_added * 100, 1) if self._total_added > 0 else 0.0,
+            ),
+            removed=LineStats(
+                lines=self._ai_removed,
+                percentage=round(self._ai_removed / self._total_removed * 100, 1) if self._total_removed > 0 else 0.0,
+            ),
+        )
+
+    def build_human_stats(self) -> ContributorStats:
+        human_total = self._human_added + self._human_removed
+        overall_total = self._ai_added + self._ai_removed + human_total
+        return ContributorStats(
+            total=LineStats(
+                lines=human_total,
+                percentage=round(human_total / overall_total * 100, 1) if overall_total > 0 else 0.0,
+            ),
+            added=LineStats(
+                lines=self._human_added,
+                percentage=round(self._human_added / self._total_added * 100, 1) if self._total_added > 0 else 0.0,
+            ),
+            removed=LineStats(
+                lines=self._human_removed,
+                percentage=round(self._human_removed / self._total_removed * 100, 1) if self._total_removed > 0 else 0.0,
+            ),
+        )
+
+    def build_file_type_stats(self, diff: Diff) -> Dict[str, FileTypeStats]:
+        result = {}
+        for ext, counts in self._by_ext.items():
+            file_count = len([f for f in diff.get_changed_files() if Path(f).suffix.lower() == ext])
+            ext_ai_total = counts['ai_added'] + counts['ai_removed']
+            ext_human_total = counts['human_added'] + counts['human_removed']
+            ext_total = ext_ai_total + ext_human_total
+            ai_pct = round(ext_ai_total / ext_total * 100, 1) if ext_total > 0 else 0.0
+            result[ext] = FileTypeStats(
+                ai_lines=ext_ai_total,
+                human_lines=ext_human_total,
+                total_lines=ext_total,
+                ai_percentage=ai_pct,
+                file_count=file_count,
+            )
+        return result
 
 
 class StatsCalculator:
@@ -14,15 +119,17 @@ class StatsCalculator:
     Pure calculation logic with no I/O dependencies.
     """
 
-    def __init__(self, hasher: LineHasher, tracked_extensions: Set[str]):
+    def __init__(self, hasher: LineHasher, tracked_extensions: Set[str], ignored_files_detector: IgnoredFilesDetector):
         """Initialize stats calculator.
 
         Args:
             hasher: LineHasher instance for consistent hashing
             tracked_extensions: Set of file extensions to include in stats (e.g. {'.py', '.java'})
+            ignored_files_detector: Detector for ignored files (excluded from AI/Human %)
         """
         self._hasher = hasher
         self._tracked_extensions = tracked_extensions
+        self._ignored_files_detector = ignored_files_detector
 
     def calculate(self, tracking: TrackingData, diff: Diff) -> ContributionStats:
         """Calculate contribution statistics.
@@ -34,172 +141,59 @@ class StatsCalculator:
         Returns:
             ContributionStats object with aggregated statistics
         """
-        total_ai_added = 0
-        total_ai_removed = 0
-        total_added = 0
-        total_removed = 0
-        by_file_type: Dict[str, Dict] = {}
+        ignored_acc = _IgnoredFilesAccumulator(self._hasher, self._ignored_files_detector)
+        contributor_acc = _ContributorAccumulator()
+        ai_tracked = set(tracking.files_tracked)
+        all_files = ai_tracked | set(diff.get_changed_files())
 
-        # Process each AI-tracked file (files where Write/Edit tool calls fired)
-        for file_path in tracking.files_tracked:
-            # Get diff for this file
+        for file_path in all_files:
             file_diff = diff.get_file_diff(file_path)
             if not file_diff:
-                # File not in diff (unchanged)
                 continue
-
-            # Count AI vs human lines for additions
-            ai_added_count, total_added_count = self._count_file_lines(
-                file_path,
-                file_diff.added_lines,
-                tracking
-            )
-
-            # Count AI vs human lines for removals.
-            # O(1) set lookup: if AI deleted the whole file, every removed line is AI.
-            if file_path in tracking.ai_deleted_files:
-                total_removed_count = len([
-                    l for l in file_diff.removed_lines if self._hasher.normalize(l)
-                ])
-                ai_removed_count = total_removed_count
-            else:
-                ai_removed_count, total_removed_count = self._count_removed_lines(
-                    file_path,
-                    file_diff.removed_lines,
-                    tracking
-                )
-
-            total_ai_added += ai_added_count
-            total_ai_removed += ai_removed_count
-            total_added += total_added_count
-            total_removed += total_removed_count
-
-            # Aggregate by file extension
-            ext = Path(file_path).suffix.lower()
-            if ext not in by_file_type:
-                by_file_type[ext] = {
-                    'ai_added': 0,
-                    'ai_removed': 0,
-                    'total_added': 0,
-                    'total_removed': 0,
-                }
-
-            by_file_type[ext]['ai_added'] += ai_added_count
-            by_file_type[ext]['ai_removed'] += ai_removed_count
-            by_file_type[ext]['total_added'] += total_added_count
-            by_file_type[ext]['total_removed'] += total_removed_count
-
-        # Process human-only files: changed in the diff but never touched by AI tools.
-        # file_diff.added_lines / removed_lines are the `+`/`-` hunk lines from
-        # `git diff --unified=0 <merge-base> HEAD` — only changed lines, not the full file.
-        # tracking has no AI hashes for these files, so _count_file_lines returns (0, total),
-        # attributing every non-blank changed line to human.
-        tracked_files_set = set(tracking.files_tracked)
-        for file_path in diff.get_changed_files():
-            if file_path in tracked_files_set:
+            # Extension filter only needed for files AI never touched
+            if file_path not in ai_tracked and self._file_ext(file_path) not in self._tracked_extensions:
                 continue
-            if Path(file_path).suffix.lower() not in self._tracked_extensions:
+            if self._ignored_files_detector.is_ignored(file_path):
+                ignored_acc.accumulate(file_path, file_diff)
                 continue
-            file_diff = diff.get_file_diff(file_path)
-            _, added_count = self._count_file_lines(file_path, file_diff.added_lines, tracking)
-
-            # O(1) set lookup: if AI deleted the whole file, attribute all removals to AI.
-            if file_path in tracking.ai_deleted_files:
-                removed_count = len([
-                    l for l in file_diff.removed_lines if self._hasher.normalize(l)
-                ])
-                ai_removed_count = removed_count
-            else:
-                _, removed_count = self._count_removed_lines(
-                    file_path, file_diff.removed_lines, tracking
-                )
-                ai_removed_count = 0
-
-            total_added += added_count
-            total_removed += removed_count
-            total_ai_removed += ai_removed_count
-            ext = Path(file_path).suffix.lower()
-            if ext not in by_file_type:
-                by_file_type[ext] = {
-                    'ai_added': 0,
-                    'ai_removed': 0,
-                    'total_added': 0,
-                    'total_removed': 0,
-                }
-            by_file_type[ext]['total_added'] += added_count
-            by_file_type[ext]['total_removed'] += removed_count
-            by_file_type[ext]['ai_removed'] += ai_removed_count
-
-        # Build overall ContributorStats
-        ai_total = total_ai_added + total_ai_removed
-        human_added = total_added - total_ai_added
-        human_removed = total_removed - total_ai_removed
-        human_total = human_added + human_removed
-        overall_total = ai_total + human_total
-
-        ai_stats = ContributorStats(
-            total=LineStats(
-                lines=ai_total,
-                percentage=round(ai_total / overall_total * 100, 1) if overall_total > 0 else 0.0
-            ),
-            added=LineStats(
-                lines=total_ai_added,
-                percentage=round(total_ai_added / total_added * 100, 1) if total_added > 0 else 0.0
-            ),
-            removed=LineStats(
-                lines=total_ai_removed,
-                percentage=round(total_ai_removed / total_removed * 100, 1) if total_removed > 0 else 0.0
-            )
-        )
-
-        human_stats = ContributorStats(
-            total=LineStats(
-                lines=human_total,
-                percentage=round(human_total / overall_total * 100, 1) if overall_total > 0 else 0.0
-            ),
-            added=LineStats(
-                lines=human_added,
-                percentage=round(human_added / total_added * 100, 1) if total_added > 0 else 0.0
-            ),
-            removed=LineStats(
-                lines=human_removed,
-                percentage=round(human_removed / total_removed * 100, 1) if total_removed > 0 else 0.0
-            )
-        )
-
-        # Calculate file type stats (for backward compatibility, keep FileTypeStats)
-        file_type_stats = {}
-        for ext, stats_dict in by_file_type.items():
-            # Count all changed files with this extension (AI-tracked + human-only)
-            file_count = len([
-                f for f in diff.get_changed_files()
-                if Path(f).suffix.lower() == ext
-            ])
-
-            # For backward compatibility, FileTypeStats only has total lines
-            ext_ai_total = stats_dict['ai_added'] + stats_dict['ai_removed']
-            ext_total_lines = stats_dict['total_added'] + stats_dict['total_removed']
-            ext_human_total = ext_total_lines - ext_ai_total
-
-            # Calculate percentage
-            if ext_total_lines > 0:
-                ai_pct = round(ext_ai_total / ext_total_lines * 100, 1)
-            else:
-                ai_pct = 0.0
-
-            file_type_stats[ext] = FileTypeStats(
-                ai_lines=ext_ai_total,
-                human_lines=ext_human_total,
-                total_lines=ext_total_lines,
-                ai_percentage=ai_pct,
-                file_count=file_count
+            ai_added, total_added = self._count_file_lines(file_path, file_diff.added_lines, tracking)
+            ai_removed, total_removed = self._count_file_removals(file_path, file_diff.removed_lines, tracking)
+            contributor_acc.add_file(
+                ai_added=ai_added, ai_removed=ai_removed,
+                human_added=total_added - ai_added, human_removed=total_removed - ai_removed,
+                file_ext=self._file_ext(file_path),
             )
 
         return ContributionStats(
-            ai_stats=ai_stats,
-            human_stats=human_stats,
-            by_file_type=file_type_stats
+            ai_stats=contributor_acc.build_ai_stats(),
+            human_stats=contributor_acc.build_human_stats(),
+            by_file_type=contributor_acc.build_file_type_stats(diff),
+            ignored_files=ignored_acc.build_ignored_files_stats(),
         )
+
+    @staticmethod
+    def _file_ext(file_path: str) -> str:
+        """Return the lowercased file extension."""
+        return Path(file_path).suffix.lower()
+
+    def _count_file_removals(self, file_path: str, removed_lines: list, tracking: TrackingData) -> tuple:
+        """Count AI vs human removed lines, honouring the ai_deleted_files shortcut.
+
+        If the file is in ai_deleted_files, all removed lines are attributed to AI
+        without per-line hash matching.
+
+        Args:
+            file_path: Relative file path
+            removed_lines: Lines removed in this file
+            tracking: TrackingData with AI removal hashes
+
+        Returns:
+            Tuple of (ai_count, total_count)
+        """
+        if file_path in tracking.ai_deleted_files:
+            total = len([l for l in removed_lines if self._hasher.normalize(l)])
+            return total, total
+        return self._count_removed_lines(file_path, removed_lines, tracking)
 
     def _count_file_lines(
         self,

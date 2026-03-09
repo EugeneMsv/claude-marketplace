@@ -1,7 +1,7 @@
 """Contribution statistics domain models."""
 
 from typing import Dict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -25,6 +25,19 @@ class ContributorStats:
     total: LineStats
     added: LineStats
     removed: LineStats
+
+
+@dataclass(frozen=True)
+class IgnoredFilesStats:
+    """Statistics for ignored files (excluded from AI/Human percentages).
+
+    Immutable value object containing line counts and the set of patterns that
+    matched at least one file in the commit.
+    """
+    total: int
+    added: int
+    removed: int
+    matched_patterns: frozenset
 
 
 @dataclass(frozen=True)
@@ -52,7 +65,8 @@ class ContributionStats:
         self,
         ai_stats: ContributorStats,
         human_stats: ContributorStats,
-        by_file_type: Dict[str, FileTypeStats]
+        by_file_type: Dict[str, FileTypeStats],
+        ignored_files: IgnoredFilesStats = None
     ):
         """Initialize contribution statistics.
 
@@ -60,10 +74,14 @@ class ContributionStats:
             ai_stats: ContributorStats for AI contributions
             human_stats: ContributorStats for human contributions
             by_file_type: Statistics broken down by file extension
+            ignored_files: Stats for ignored files (excluded from AI/Human %)
         """
         self._ai_stats = ai_stats
         self._human_stats = human_stats
         self._by_file_type = by_file_type.copy()
+        self._ignored_files: IgnoredFilesStats = ignored_files if ignored_files is not None else IgnoredFilesStats(
+            total=0, added=0, removed=0, matched_patterns=frozenset()
+        )
 
     @classmethod
     def from_dict(cls, data: Dict) -> 'ContributionStats':
@@ -98,7 +116,20 @@ class ContributionStats:
                 file_count=ft['file_count'],
             )
 
-        return cls(ai_stats=ai_stats, human_stats=human_stats, by_file_type=by_file_type)
+        ig_data = data.get('ignored_files', {})
+        ignored_files = IgnoredFilesStats(
+            total=ig_data.get('total', 0),
+            added=ig_data.get('added', 0),
+            removed=ig_data.get('removed', 0),
+            matched_patterns=frozenset(ig_data.get('matched_patterns', [])),
+        )
+
+        return cls(
+            ai_stats=ai_stats,
+            human_stats=human_stats,
+            by_file_type=by_file_type,
+            ignored_files=ignored_files,
+        )
 
     @property
     def ai_stats(self) -> ContributorStats:
@@ -129,6 +160,11 @@ class ContributionStats:
     def ai_percentage(self) -> float:
         """Get AI contribution percentage."""
         return self._ai_stats.total.percentage
+
+    @property
+    def ignored_files(self) -> IgnoredFilesStats:
+        """Get ignored file statistics."""
+        return self._ignored_files
 
     @property
     def by_file_type(self) -> Dict[str, FileTypeStats]:
@@ -186,6 +222,12 @@ class ContributionStats:
                     'file_count': stats.file_count
                 }
                 for ext, stats in self._by_file_type.items()
+            },
+            'ignored_files': {
+                'total': self._ignored_files.total,
+                'added': self._ignored_files.added,
+                'removed': self._ignored_files.removed,
+                'matched_patterns': sorted(self._ignored_files.matched_patterns),
             }
         }
 
@@ -242,6 +284,14 @@ class ContributionStats:
         tracked = self._format_tracked_extensions()
         if tracked:
             msg += f"\n{tracked}"
+
+        # Append ignored-files section when there are ignored lines
+        if self._ignored_files.total > 0:
+            msg += f"\n  Ignored: {self._ignored_files.total} lines excluded"
+            msg += f"\n    +{self._ignored_files.added} -{self._ignored_files.removed}"
+            if self._ignored_files.matched_patterns:
+                patterns_str = ", ".join(sorted(self._ignored_files.matched_patterns))
+                msg += f"\n    Matched patterns: {patterns_str}"
 
         return msg
 

@@ -4,6 +4,7 @@ from collections import Counter
 from logging import Logger
 from pathlib import Path
 from typing import Dict, List
+from domain.ignored_files_detector import IgnoredFilesDetector
 from domain.line_hasher import LineHasher
 from domain.tracking_data import TrackingData
 from infrastructure.git_repository import GitRepository
@@ -29,7 +30,8 @@ class CaptureService:
         config: Configuration,
         hasher: LineHasher,
         logger: Logger,
-        write_snapshot_repo: WriteSnapshotRepository
+        write_snapshot_repo: WriteSnapshotRepository,
+        ignored_files_detector: IgnoredFilesDetector
     ):
         """Initialize capture service.
 
@@ -39,12 +41,14 @@ class CaptureService:
             hasher: LineHasher for computing line hashes
             logger: Logger instance with hook context
             write_snapshot_repo: Repository for storing pre-write file snapshots
+            ignored_files_detector: Detector for ignored files (skip tracking)
         """
         self._git_repo = git_repo
         self._config = config
         self._hasher = hasher
         self._logger = logger
         self._write_snapshot_repo = write_snapshot_repo
+        self._ignored_files_detector = ignored_files_detector
 
     def store_pre_write_snapshot(self, file_path: str) -> None:
         """Snapshot existing file content before a Write tool overwrites it.
@@ -126,6 +130,10 @@ class CaptureService:
             return False
 
         self._logger.info(f"Processing on {file_path}")
+
+        if self._ignored_files_detector.is_ignored(file_path):
+            self._logger.info(f"Ignored file, skipping: {file_path}")
+            return False
 
         if not self._config.should_track_file(Path(file_path)):
             ext = Path(file_path).suffix.lower()

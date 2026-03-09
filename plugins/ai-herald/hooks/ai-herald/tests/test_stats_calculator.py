@@ -7,6 +7,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from services.stats_calculator import StatsCalculator
+from domain.ignored_files_detector import IgnoredFilesDetector
 from domain.tracking_data import TrackingData
 from domain.diff import Diff, DiffFile
 from domain.line_hasher import LineHasher
@@ -18,8 +19,14 @@ def hasher():
 
 
 @pytest.fixture
-def calculator(hasher):
-    return StatsCalculator(hasher, {'.py', '.java', '.kt', '.js', '.ts'})
+def no_op_detector():
+    """IgnoredFilesDetector that never matches anything."""
+    return IgnoredFilesDetector(set())
+
+
+@pytest.fixture
+def calculator(hasher, no_op_detector):
+    return StatsCalculator(hasher, {'.py', '.java', '.kt', '.js', '.ts'}, no_op_detector)
 
 
 @pytest.fixture
@@ -310,10 +317,10 @@ class TestCalculate:
 class TestCalculateHumanOnlyFiles:
     """Tests for files changed in the diff but never touched by AI tools."""
 
-    def test_manually_edited_file_counted_as_human(self, hasher, tracking):
+    def test_manually_edited_file_counted_as_human(self, hasher, tracking, no_op_detector):
         """Given a file absent from files_tracked with a tracked extension,
         all changed lines from the diff are attributed to human."""
-        calculator = StatsCalculator(hasher, {'.py'})
+        calculator = StatsCalculator(hasher, {'.py'}, no_op_detector)
         diff = Diff("abc123", {
             "src/service.py": DiffFile("src/service.py", ["def foo():", "    return 42"], [])
         })
@@ -323,10 +330,10 @@ class TestCalculateHumanOnlyFiles:
         assert stats.human_stats.added.lines == 2
         assert stats.ai_stats.added.lines == 0
 
-    def test_mixed_ai_tracked_and_human_only_files(self, hasher, tracking):
+    def test_mixed_ai_tracked_and_human_only_files(self, hasher, tracking, no_op_detector):
         """Given one AI-tracked file and one human-only file,
         stats correctly split attribution across both."""
-        calculator = StatsCalculator(hasher, {'.py'})
+        calculator = StatsCalculator(hasher, {'.py'}, no_op_detector)
         ai_line = "def ai_func(): pass"
         tracking.add_ai_lines("src/ai.py", [ai_line], hasher)
         tracking.track_file("src/ai.py")
@@ -341,9 +348,9 @@ class TestCalculateHumanOnlyFiles:
         assert stats.ai_stats.added.lines == 1
         assert stats.human_stats.added.lines == 2
 
-    def test_untracked_extension_excluded(self, hasher, tracking):
+    def test_untracked_extension_excluded(self, hasher, tracking, no_op_detector):
         """Files with extensions not in tracked_extensions are excluded entirely."""
-        calculator = StatsCalculator(hasher, {'.py'})
+        calculator = StatsCalculator(hasher, {'.py'}, no_op_detector)
         diff = Diff("abc123", {
             "README.md": DiffFile("README.md", ["# Title", "some text"], [])
         })
@@ -353,9 +360,9 @@ class TestCalculateHumanOnlyFiles:
         assert stats.human_stats.added.lines == 0
         assert stats.ai_stats.added.lines == 0
 
-    def test_human_only_file_removals_counted(self, hasher, tracking):
+    def test_human_only_file_removals_counted(self, hasher, tracking, no_op_detector):
         """Given a human-only file with removed lines, removals are attributed to human."""
-        calculator = StatsCalculator(hasher, {'.py'})
+        calculator = StatsCalculator(hasher, {'.py'}, no_op_detector)
         diff = Diff("abc123", {
             "src/old.py": DiffFile("src/old.py", [], ["def old_func(): pass", "    pass"])
         })
@@ -364,3 +371,111 @@ class TestCalculateHumanOnlyFiles:
 
         assert stats.human_stats.removed.lines == 2
         assert stats.ai_stats.removed.lines == 0
+
+
+class TestCalculateIgnoredFilesRouting:
+    """Tests for ignored file routing in StatsCalculator."""
+
+    def test_ignored_file_excluded_from_ai_human_totals(self, hasher, tracking):
+        """Given an AI-tracked file matching an ignored pattern, it goes to ignored bucket."""
+        detector = IgnoredFilesDetector({"**/generated/**"})
+        calculator = StatsCalculator(hasher, {'.java'}, detector)
+        tracking.add_ai_lines("src/generated/Foo.java", ["line A", "line B"], hasher)
+        tracking.track_file("src/generated/Foo.java")
+
+        diff = Diff("abc123", {
+            "src/generated/Foo.java": DiffFile(
+                "src/generated/Foo.java", ["line A", "line B"], []
+            )
+        })
+
+        stats = calculator.calculate(tracking, diff)
+
+        assert stats.ai_stats.total.lines == 0
+        assert stats.human_stats.total.lines == 0
+        assert stats.ignored_files.total == 2
+        assert stats.ignored_files.added == 2
+        assert stats.ignored_files.removed == 0
+        assert "**/generated/**" in stats.ignored_files.matched_patterns
+
+    def test_human_only_ignored_file_excluded(self, hasher, tracking):
+        """Given a human-only file matching an ignored pattern, it goes to ignored bucket."""
+        detector = IgnoredFilesDetector({"**/generated/**"})
+        calculator = StatsCalculator(hasher, {'.java'}, detector)
+
+        diff = Diff("abc123", {
+            "src/generated/Bar.java": DiffFile(
+                "src/generated/Bar.java", ["line X", "line Y", "line Z"], []
+            )
+        })
+
+        stats = calculator.calculate(tracking, diff)
+
+        assert stats.ai_stats.total.lines == 0
+        assert stats.human_stats.total.lines == 0
+        assert stats.ignored_files.total == 3
+        assert "**/generated/**" in stats.ignored_files.matched_patterns
+
+    def test_non_ignored_file_not_affected(self, hasher, tracking):
+        """Given a regular file, it is unaffected by the ignored-files detector."""
+        detector = IgnoredFilesDetector({"**/generated/**"})
+        calculator = StatsCalculator(hasher, {'.py'}, detector)
+        tracking.add_ai_lines("src/main/Foo.py", ["def foo(): pass"], hasher)
+        tracking.track_file("src/main/Foo.py")
+
+        diff = Diff("abc123", {
+            "src/main/Foo.py": DiffFile("src/main/Foo.py", ["def foo(): pass"], [])
+        })
+
+        stats = calculator.calculate(tracking, diff)
+
+        assert stats.ai_stats.total.lines == 1
+        assert stats.ignored_files.total == 0
+
+    def test_mixed_regular_and_ignored_files(self, hasher, tracking):
+        """Given mixed files, ignored lines excluded from AI/human denominator."""
+        detector = IgnoredFilesDetector({"**/generated/**"})
+        calculator = StatsCalculator(hasher, {'.java'}, detector)
+
+        tracking.add_ai_lines("src/main/Service.java", ["line A"], hasher)
+        tracking.track_file("src/main/Service.java")
+
+        diff = Diff("abc123", {
+            "src/main/Service.java": DiffFile("src/main/Service.java", ["line A"], []),
+            "src/generated/Client.java": DiffFile("src/generated/Client.java", ["gen A", "gen B"], []),
+        })
+
+        stats = calculator.calculate(tracking, diff)
+
+        assert stats.ai_stats.total.lines == 1
+        assert stats.human_stats.total.lines == 0
+        assert stats.ignored_files.total == 2
+
+    def test_ignored_removals_tracked_in_ignored_bucket(self, hasher, tracking):
+        """Given ignored file with removed lines, removals go to ignored bucket."""
+        detector = IgnoredFilesDetector({"**/generated/**"})
+        calculator = StatsCalculator(hasher, {'.java'}, detector)
+
+        diff = Diff("abc123", {
+            "src/generated/Old.java": DiffFile("src/generated/Old.java", [], ["old gen line"])
+        })
+
+        stats = calculator.calculate(tracking, diff)
+
+        assert stats.ignored_files.removed == 1
+        assert stats.ai_stats.removed.lines == 0
+        assert stats.human_stats.removed.lines == 0
+
+    def test_no_detector_patterns_routes_all_to_ai_human(self, hasher, tracking):
+        """Given empty pattern set, no files routed to ignored bucket."""
+        detector = IgnoredFilesDetector(set())
+        calculator = StatsCalculator(hasher, {'.java'}, detector)
+
+        diff = Diff("abc123", {
+            "src/generated/Foo.java": DiffFile("src/generated/Foo.java", ["line A"], [])
+        })
+
+        stats = calculator.calculate(tracking, diff)
+
+        assert stats.ignored_files.total == 0
+        assert stats.human_stats.total.lines == 1

@@ -39,6 +39,7 @@ class DependencyProvider:
         self._git_repo: Optional[GitRepository] = None
         self._detector = None
         self._deletion_targets_detector = None
+        self._ignored_files_detector = None
 
     def config(self) -> Configuration:
         """Return cached Configuration, loading it on first call."""
@@ -85,6 +86,13 @@ class DependencyProvider:
             self._deletion_targets_detector = DeletionTargetsDetector()
         return self._deletion_targets_detector
 
+    def ignored_files_detector(self) -> 'IgnoredFilesDetector':
+        """Return cached IgnoredFilesDetector configured from current config."""
+        if self._ignored_files_detector is None:
+            from domain.ignored_files_detector import IgnoredFilesDetector
+            self._ignored_files_detector = IgnoredFilesDetector(self.config().ignored_paths)
+        return self._ignored_files_detector
+
     # --- Service builders ---
 
     def build_write_snapshot_repo(self) -> WriteSnapshotRepository:
@@ -103,7 +111,7 @@ class DependencyProvider:
         from services.capture_service import CaptureService
         return CaptureService(
             self.git_repo(), self.config(), LineHasher(), self.logger(),
-            self.build_write_snapshot_repo()
+            self.build_write_snapshot_repo(), self.ignored_files_detector()
         )
 
     def build_inject_service(self) -> InjectService:
@@ -112,7 +120,7 @@ class DependencyProvider:
         from services.stats_calculator import StatsCalculator
         from services.inject_service import InjectService
         hasher = LineHasher()
-        stats_calculator = StatsCalculator(hasher, self.config().tracked_extensions)
+        stats_calculator = StatsCalculator(hasher, self.config().tracked_extensions, self.ignored_files_detector())
         return InjectService(self.git_repo(), self.config(), stats_calculator, self.logger())
 
     def build_mr_service(self) -> MrService:

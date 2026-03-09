@@ -192,7 +192,10 @@ class InjectService:
         diff = self._git_repo.get_diff(tracking.merge_base)
         stats = self._stats_calculator.calculate(tracking, diff)
 
-        self._logger.info(f"Stats: {stats.ai_lines} AI, {stats.human_lines} human")
+        ignored = stats.ignored_files
+        self._logger.info(f"Stats: {stats.ai_lines} AI, {stats.human_lines} human, {ignored.total} ignored")
+        if ignored.total > 0:
+            self._logger.info(f"Ignored matched patterns: {sorted(ignored.matched_patterns)}")
 
         # Update tracking data with stats and clear commit intent flag
         tracking.stats = stats.to_dict()

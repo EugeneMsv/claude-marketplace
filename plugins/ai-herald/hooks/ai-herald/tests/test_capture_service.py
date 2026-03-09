@@ -11,6 +11,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from services.capture_service import CaptureService
+from domain.ignored_files_detector import IgnoredFilesDetector
 from domain.line_hasher import LineHasher
 from domain.tracking_data import TrackingData
 from infrastructure.tracking_repository import TrackingRepository
@@ -165,7 +166,7 @@ def _make_service(git_root: Path, branch: str = "feature/test", tracked_ext=".py
     logger = logging.getLogger("test")
     snapshot_repo = WriteSnapshotRepository(git_root)
 
-    return CaptureService(git_repo, config, hasher, logger, snapshot_repo)
+    return CaptureService(git_repo, config, hasher, logger, snapshot_repo, IgnoredFilesDetector(set()))
 
 
 class TestStorePreWriteSnapshot:
@@ -341,3 +342,79 @@ class TestProcessEdit:
             service = _make_service(Path(tmpdir))
             result = service.process_edit({"old_string": "a", "new_string": "b"})
             assert result is False
+
+
+def _make_service_with_detector(git_root: Path, detector: IgnoredFilesDetector, branch: str = "feature/test") -> CaptureService:
+    """Build CaptureService with a custom IgnoredFilesDetector."""
+    git_repo = MagicMock()
+    git_repo.get_root.return_value = git_root
+    git_repo.get_current_branch.return_value = branch
+    git_repo.sanitize_branch_name = GitRepository.sanitize_branch_name
+
+    config = MagicMock()
+    config.should_track_file.return_value = True  # all extensions tracked
+
+    hasher = LineHasher()
+    logger = logging.getLogger("test")
+    snapshot_repo = WriteSnapshotRepository(git_root)
+
+    return CaptureService(git_repo, config, hasher, logger, snapshot_repo, detector)
+
+
+class TestProcessSkipsIgnoredFiles:
+    """Tests that CaptureService skips ignored files."""
+
+    def test_write_to_ignored_file_returns_false(self):
+        """Given Write to an ignored file, returns False without tracking."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            git_root = Path(tmpdir)
+            (git_root / ".claude").mkdir()
+            detector = IgnoredFilesDetector({"**/generated/**"})
+            service = _make_service_with_detector(git_root, detector)
+
+            tool_input = {
+                "file_path": str(git_root / "src" / "generated" / "Foo.java"),
+                "content": "public class Foo {}\n",
+            }
+            result = service.process_write(tool_input)
+
+            assert result is False
+            # Verify no tracking file was created
+            tracking_repo = TrackingRepository(git_root, "feature-test")
+            assert tracking_repo.load() is None
+
+    def test_edit_to_ignored_file_returns_false(self):
+        """Given Edit to an ignored file, returns False without tracking."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            git_root = Path(tmpdir)
+            (git_root / ".claude").mkdir()
+            detector = IgnoredFilesDetector({"**/generated/**"})
+            service = _make_service_with_detector(git_root, detector)
+
+            tool_input = {
+                "file_path": str(git_root / "src" / "generated" / "Foo.java"),
+                "old_string": "old",
+                "new_string": "new",
+            }
+            result = service.process_edit(tool_input)
+
+            assert result is False
+
+    def test_write_to_regular_file_not_affected(self):
+        """Given Write to a non-ignored file, it is tracked normally."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            git_root = Path(tmpdir)
+            (git_root / ".claude").mkdir()
+            detector = IgnoredFilesDetector({"**/generated/**"})
+            service = _make_service_with_detector(git_root, detector)
+
+            tool_input = {
+                "file_path": str(git_root / "src" / "main" / "Foo.java"),
+                "content": "public class Foo {}\n",
+            }
+            result = service.process_write(tool_input)
+
+            assert result is True
+            tracking_repo = TrackingRepository(git_root, "feature-test")
+            tracking = tracking_repo.load()
+            assert tracking is not None

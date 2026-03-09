@@ -494,3 +494,204 @@ class TestResolvePluginVersion:
         monkeypatch.setenv('CLAUDE_PLUGIN_ROOT', str(tmp_path))
 
         assert ConfigurationLoader.resolve_plugin_version() == "dev"
+
+
+class TestConfigurationIgnoredPaths:
+    """Tests for ignored_paths field."""
+
+    def test_ignored_paths_default_is_empty_set(self):
+        """Given no ignored_paths arg, defaults to empty set."""
+        config = Configuration(
+            enabled=True,
+            base_branches=["main"],
+            tracked_extensions={".py"},
+            enable_logging=False,
+            log_file="test.log",
+        )
+        assert config.ignored_paths == set()
+
+    def test_ignored_paths_stores_given_set(self):
+        """Given ignored_paths set, property returns a copy of it."""
+        patterns = {"**/generated/**", "**/*.generated.ts"}
+        config = Configuration(
+            enabled=True,
+            base_branches=["main"],
+            tracked_extensions={".py"},
+            enable_logging=False,
+            log_file="test.log",
+            ignored_paths=patterns,
+        )
+        assert config.ignored_paths == patterns
+
+    def test_ignored_paths_returns_copy(self):
+        """Given patterns, modifying returned set does not affect config."""
+        patterns = {"**/generated/**"}
+        config = Configuration(
+            enabled=True,
+            base_branches=["main"],
+            tracked_extensions={".py"},
+            enable_logging=False,
+            log_file="test.log",
+            ignored_paths=patterns,
+        )
+        returned = config.ignored_paths
+        returned.add("**/__generated__/**")
+        assert "**/__generated__/**" not in config.ignored_paths
+
+
+class TestConfigurationLoaderIgnoredPaths:
+    """Tests for ConfigurationLoader loading ignored_paths."""
+
+    def test_default_config_has_ignored_paths(self):
+        """DEFAULT_CONFIG includes ignored_paths list with only **/generated/**."""
+        assert 'ignored_paths' in ConfigurationLoader.DEFAULT_CONFIG
+        patterns = ConfigurationLoader.DEFAULT_CONFIG['ignored_paths']
+        assert isinstance(patterns, list)
+        assert patterns == ['**/generated/**']
+
+    def test_load_with_custom_patterns(self, tmp_path):
+        """Given config with ignored_paths, loads correctly as set."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "enabled": True,
+            "base_branches": ["main"],
+            "tracked_extensions": [".py"],
+            "enable_logging": False,
+            "log_file": "test.log",
+            "ignored_paths": ["**/custom/**", "**/*.gen.ts"],
+        }))
+        config = ConfigurationLoader.load(config_file)
+        assert config.ignored_paths == {"**/custom/**", "**/*.gen.ts"}
+
+    def test_load_without_patterns_falls_back_to_default(self, tmp_path):
+        """Given config without ignored_paths, falls back to default list."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "enabled": True,
+            "base_branches": ["main"],
+            "tracked_extensions": [".py"],
+            "enable_logging": False,
+            "log_file": "test.log",
+        }))
+        config = ConfigurationLoader.load(config_file)
+        assert config.ignored_paths == {'**/generated/**'}
+
+    def test_load_with_empty_patterns_list(self, tmp_path):
+        """Given ignored_paths=[], loads as empty set."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "enabled": True,
+            "base_branches": ["main"],
+            "tracked_extensions": [".py"],
+            "enable_logging": False,
+            "log_file": "test.log",
+            "ignored_paths": [],
+        }))
+        config = ConfigurationLoader.load(config_file)
+        assert config.ignored_paths == set()
+
+
+class TestConfigurationLoaderForwardFillDefaults:
+    """Tests for ConfigurationLoader forward-filling missing keys from defaults."""
+
+    def test_missing_top_level_key_filled_on_disk(self, tmp_path):
+        """Given config missing top-level keys, load() writes all defaults back to disk."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"enabled": True}))
+
+        ConfigurationLoader.load(config_file)
+
+        on_disk = json.loads(config_file.read_text())
+        for key in ConfigurationLoader.DEFAULT_CONFIG:
+            assert key in on_disk, f"Expected key '{key}' to be filled in on disk"
+
+    def test_missing_nested_key_filled_sibling_preserved(self, tmp_path):
+        """Given format_detection with only enabled=false, missing commands is filled."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "format_detection": {"enabled": False}
+        }))
+
+        ConfigurationLoader.load(config_file)
+
+        on_disk = json.loads(config_file.read_text())
+        assert on_disk["format_detection"]["enabled"] is False
+        assert on_disk["format_detection"]["commands"] == ConfigurationLoader.DEFAULT_CONFIG["format_detection"]["commands"]
+
+    def test_missing_entire_subtree_filled(self, tmp_path):
+        """Given config with no housekeeping section, entire subtree is filled from defaults."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"enabled": True}))
+
+        ConfigurationLoader.load(config_file)
+
+        on_disk = json.loads(config_file.read_text())
+        default_housekeeping = ConfigurationLoader.DEFAULT_CONFIG["housekeeping"]
+        assert on_disk["housekeeping"] == default_housekeeping
+
+    def test_explicit_false_not_overwritten(self, tmp_path):
+        """Given enabled=false, load() keeps it false in config and on disk."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"enabled": False}))
+
+        config = ConfigurationLoader.load(config_file)
+
+        assert config.enabled is False
+        on_disk = json.loads(config_file.read_text())
+        assert on_disk["enabled"] is False
+
+    def test_explicit_custom_list_not_overwritten(self, tmp_path):
+        """Given base_branches with custom value, default list is not substituted."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"base_branches": ["custom-branch"]}))
+
+        config = ConfigurationLoader.load(config_file)
+
+        assert config.base_branches == ["custom-branch"]
+        on_disk = json.loads(config_file.read_text())
+        assert on_disk["base_branches"] == ["custom-branch"]
+
+    def test_nested_custom_value_not_overwritten_missing_sibling_filled(self, tmp_path):
+        """Given housekeeping with custom staleDaysThreshold, value kept and missing keys filled."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "housekeeping": {"staleDaysThreshold": 30}
+        }))
+
+        ConfigurationLoader.load(config_file)
+
+        on_disk = json.loads(config_file.read_text())
+        assert on_disk["housekeeping"]["staleDaysThreshold"] == 30
+        assert on_disk["housekeeping"]["enabled"] == ConfigurationLoader.DEFAULT_CONFIG["housekeeping"]["enabled"]
+        assert on_disk["housekeeping"]["maxFilesPerRun"] == ConfigurationLoader.DEFAULT_CONFIG["housekeeping"]["maxFilesPerRun"]
+
+    def test_explicit_empty_list_not_overwritten(self, tmp_path):
+        """Given ignored_paths=[], empty list is not replaced with defaults."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"ignored_paths": []}))
+
+        config = ConfigurationLoader.load(config_file)
+
+        assert config.ignored_paths == set()
+        on_disk = json.loads(config_file.read_text())
+        assert on_disk["ignored_paths"] == []
+
+    def test_explicit_null_not_overwritten(self, tmp_path):
+        """Given log_file=null, null value is preserved on disk."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"log_file": None}))
+
+        ConfigurationLoader.load(config_file)
+
+        on_disk = json.loads(config_file.read_text())
+        assert on_disk["log_file"] is None
+
+    def test_complete_config_not_rewritten(self, tmp_path):
+        """Given a complete config equal to defaults, file is not rewritten."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(ConfigurationLoader.DEFAULT_CONFIG))
+        mtime_before = config_file.stat().st_mtime
+
+        ConfigurationLoader.load(config_file)
+
+        assert config_file.stat().st_mtime == mtime_before
