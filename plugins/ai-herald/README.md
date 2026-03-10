@@ -14,10 +14,12 @@ Watches every AI write, then announces attribution stats at commit time — inje
 - [MR Title Stats, Auto-Creation & Labeling](#mr-title-stats-auto-creation--labeling)
 - [Missed Commit Recovery](#missed-commit-recovery)
 - [Automatic Housekeeping](#automatic-housekeeping)
+- [On-Demand Stats (`/ai-herald-stats`)](#on-demand-stats-ai-herald-stats)
 - [Example](#example)
 - [Tracking Files](#tracking-files)
 - [Disabling](#disabling)
 - [Structure](#structure)
+- [Skills](#skills)
 - [Testing](#testing)
 - [Technical Details](#technical-details)
 
@@ -52,6 +54,7 @@ Before using AI Herald, ensure the following requirements are met:
 - **Bash Deletion Tracking**: When AI runs `rm`, `git rm`, or `unlink` via the Bash tool, all removed lines from the deleted file are attributed to AI automatically
 - **Automatic Housekeeping**: Cleans up stale tracking files for deleted/merged branches
 - **Ignored Files Exclusion**: Files matching configurable Ant-style glob patterns (e.g. `**/generated/**`) are tracked separately as Ignored and excluded from AI/Human percentages
+- **On-Demand Stats**: Query current branch AI contribution stats at any time without committing — invoke `/ai-herald-stats` or ask Claude to show AI attribution stats
 - **Configurable**: Support for multiple base branches, file extensions, and logging
 
 ## Current Limitations
@@ -525,6 +528,26 @@ The tracker automatically cleans up stale tracking files for branches that have 
 }
 ```
 
+## On-Demand Stats (`/ai-herald-stats`)
+
+Query current branch AI contribution stats at any time — without making a commit.
+
+**Invoke with:**
+
+```
+/ai-herald-stats
+```
+
+Or ask Claude: _"show AI attribution stats"_, _"what is the AI percentage"_, _"how much did AI contribute"_.
+
+For JSON output:
+
+```bash
+python3 $CLAUDE_PLUGIN_ROOT/skills/ai-herald-stats/herald-query-stats.py --json
+```
+
+The script exits cleanly with an informational message when AI Herald is disabled, not in a git repository, or no tracking data exists for the current branch.
+
 ## Example
 
 **Scenario:**
@@ -718,6 +741,10 @@ Per-branch tracking files are stored in `.claude/herald/{branch}.json`:
 - `services/` - Workflow coordination (CaptureService, InjectService, MrService, StatsCalculator, FormatSnapshotService, FormatTrackerService, DeletionTrackerService, DeletionTargetsDetector)
 - `tests/` - Unit tests
 - `ai-herald.log` - Debug log (if logging enabled)
+
+## Skills
+
+- `skills/ai-herald-stats/herald-query-stats.py` - On-demand stats query script (invoked by `/ai-herald-stats`)
 
 ## Testing
 
