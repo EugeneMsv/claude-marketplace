@@ -152,3 +152,12 @@ class DependencyProvider:
         return DeletionTrackerService(
             self.git_repo(), self.config(), self.logger()
         )
+
+    def build_query_stats_service(self) -> 'QueryStatsService':
+        """Build and return a fully-wired QueryStatsService."""
+        from domain.line_hasher import LineHasher
+        from services.stats_calculator import StatsCalculator
+        from services.query_stats_service import QueryStatsService
+        hasher = LineHasher()
+        stats_calculator = StatsCalculator(hasher, self.config().tracked_extensions, self.ignored_files_detector())
+        return QueryStatsService(self.git_repo(), self.config(), stats_calculator, self.logger())
