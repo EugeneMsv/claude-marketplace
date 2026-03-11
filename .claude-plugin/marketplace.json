@@ -1,9 +1,9 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "version": "0.0.13",
+  "version": "0.0.14",
   "name": "eug-msv-claude-marketplace",
   "description": "Plugin marketplace for Claude Code from Eugene Moiseev",
-  "updated": "2026-03-09",
+  "updated": "2026-03-11",
   "owner": {
     "name": "Eugene Moiseev",
     "url": "https://github.com/EugeneMsv"
@@ -13,13 +13,13 @@
       "name": "ai-herald",
       "source": "./plugins/ai-herald",
       "description": "AI Herald — watches every write, announces attribution at commit time",
-      "version": "0.0.13",
+      "version": "0.0.14",
       "author": {
         "name": "Eugene Moiseev"
       },
       "category": "development",
       "homepage": "https://github.com/EugeneMsv/claude-marketplace/tree/main/plugins/ai-herald",
-      "tags": ["metrics","monitoring","tracking"]
+      "tags": ["metrics","monitoring","tracking","analytics"]
     }
   ]
 }

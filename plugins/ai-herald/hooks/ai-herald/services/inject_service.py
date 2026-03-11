@@ -3,6 +3,7 @@
 from datetime import datetime
 from logging import Logger
 from typing import Optional
+from domain.contribution_stats import ContributionStats
 from domain.tracking_data import TrackingData
 from infrastructure.git_repository import GitRepository
 from infrastructure.configuration import Configuration
@@ -13,17 +14,28 @@ from services.stats_calculator import StatsCalculator
 class InjectResult:
     """Result of processing a git commit."""
 
-    def __init__(self, success: bool, ai_percentage: Optional[int] = None, message: Optional[str] = None):
+    def __init__(
+        self,
+        success: bool,
+        ai_percentage: Optional[int] = None,
+        message: Optional[str] = None,
+        stats: Optional[ContributionStats] = None,
+        tracking: Optional[TrackingData] = None,
+    ):
         """Initialize inject result.
 
         Args:
             success: Whether commit was successfully amended
             ai_percentage: AI contribution percentage (0-100), None if failed
             message: Optional informational message to show user
+            stats: ContributionStats computed during inject, None on failure
+            tracking: TrackingData used during inject, None on failure
         """
         self.success = success
         self.ai_percentage = ai_percentage
         self.message = message
+        self.stats = stats
+        self.tracking = tracking
 
 
 class InjectService:
@@ -219,7 +231,7 @@ class InjectService:
         if self._git_repo.amend_commit_message(new_message):
             self._logger.info("=== Commit amended successfully ===")
             ai_percentage = int(round(stats.ai_percentage))
-            return InjectResult(True, ai_percentage)
+            return InjectResult(True, ai_percentage, stats=stats, tracking=tracking)
         else:
             self._logger.error("Failed to amend commit")
             return InjectResult(False, message="❌ Failed to amend commit with AI stats")

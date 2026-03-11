@@ -28,7 +28,8 @@ class Configuration:
         housekeeping_enabled: bool = False,
         housekeeping_stale_days: int = 7,
         housekeeping_max_files: int = 5,
-        ignored_paths: Optional[Set[str]] = None
+        ignored_paths: Optional[Set[str]] = None,
+        history_enabled: bool = False
     ):
         """Initialize configuration.
 
@@ -48,6 +49,7 @@ class Configuration:
             housekeeping_stale_days: Days threshold for stale tracking files
             housekeeping_max_files: Max files to process per housekeeping run
             ignored_paths: Ant-style glob patterns for ignored files
+            history_enabled: Whether per-commit history tracking is enabled
         """
         self._enabled = enabled
         self._base_branches = base_branches.copy()
@@ -64,6 +66,7 @@ class Configuration:
         self._housekeeping_stale_days = housekeeping_stale_days
         self._housekeeping_max_files = housekeeping_max_files
         self._ignored_paths: Set[str] = set(ignored_paths) if ignored_paths else set()
+        self._history_enabled = history_enabled
 
         # Environment variables can override
         self._disable_env = os.environ.get('DISABLE_AI_STATS', '0') == '1'
@@ -155,6 +158,11 @@ class Configuration:
         return self._housekeeping_max_files
 
     @property
+    def history_enabled(self) -> bool:
+        """Check if per-commit history tracking is enabled."""
+        return self._history_enabled
+
+    @property
     def ignored_paths(self) -> Set[str]:
         """Get Ant-style glob patterns for ignored files."""
         return self._ignored_paths.copy()
@@ -224,7 +232,10 @@ class ConfigurationLoader:
         },
         'ignored_paths': [
             '**/generated/**'
-        ]
+        ],
+        'history': {
+            'enabled': False
+        }
     }
 
     @staticmethod
@@ -358,6 +369,11 @@ class ConfigurationLoader:
         default_ignored_paths = ConfigurationLoader.DEFAULT_CONFIG['ignored_paths']
         ignored_paths = set(config_dict.get('ignored_paths', default_ignored_paths))
 
+        # Load history settings with defaults
+        default_history = ConfigurationLoader.DEFAULT_CONFIG['history']
+        history_config = config_dict.get('history', default_history)
+        history_enabled = history_config.get('enabled', default_history['enabled'])
+
         return Configuration(
             enabled=config_dict.get('enabled', ConfigurationLoader.DEFAULT_CONFIG['enabled']),
             base_branches=config_dict.get('base_branches', ConfigurationLoader.DEFAULT_CONFIG['base_branches']),
@@ -373,7 +389,8 @@ class ConfigurationLoader:
             housekeeping_enabled=housekeeping_enabled,
             housekeeping_stale_days=housekeeping_stale_days,
             housekeeping_max_files=housekeeping_max_files,
-            ignored_paths=ignored_paths
+            ignored_paths=ignored_paths,
+            history_enabled=history_enabled
         )
 
     @staticmethod
