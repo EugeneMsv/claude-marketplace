@@ -1,6 +1,15 @@
 ---
 name: ai-herald-stats
-description: This skill should be used when the user invokes "/ai-herald-stats", asks to "show AI attribution stats", "check AI contribution stats", "show current branch stats", "what is the AI percentage", "how much did AI contribute", or wants to view current AI vs human contribution breakdown for the active branch without making a commit.
+description: >
+  This skill should be used when the user invokes "/ai-herald-stats", or asks any of the following
+  (or similar phrasing): "show AI attribution stats", "check AI contribution stats",
+  "show current branch stats", "what is the AI percentage", "how much did AI contribute",
+  "how many lines did Claude write", "what percentage of this branch is AI-generated",
+  "show me the AI breakdown for this branch", "how much code did AI write so far",
+  "what's my current AI attribution", "am I on track for AI contribution",
+  "show AI vs human split", "check how much AI code is on this branch",
+  or any request to see the current AI vs human contribution breakdown for the active branch
+  without making a commit.
 version: 0.1.0
 ---
 

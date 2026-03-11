@@ -157,7 +157,21 @@ class DependencyProvider:
         """Build and return a fully-wired QueryStatsService."""
         from domain.line_hasher import LineHasher
         from services.stats_calculator import StatsCalculator
-        from services.query_stats_service import QueryStatsService
+        from services.query.query_stats_service import QueryStatsService
         hasher = LineHasher()
         stats_calculator = StatsCalculator(hasher, self.config().tracked_extensions, self.ignored_files_detector())
         return QueryStatsService(self.git_repo(), self.config(), stats_calculator, self.logger())
+
+    def build_history_append_service(self) -> 'HistoryAppendService':
+        """Build and return a fully-wired HistoryAppendService."""
+        from infrastructure.history_repository import HistoryRepository
+        from services.history_append_service import HistoryAppendService
+        history_repo = HistoryRepository(self.git_repo())
+        return HistoryAppendService(self.git_repo(), history_repo, self.config(), self.logger())
+
+    def build_history_query_service(self) -> 'HistoryQueryService':
+        """Build and return a fully-wired HistoryQueryService."""
+        from infrastructure.history_repository import HistoryRepository
+        from services.query.history_query_service import HistoryQueryService
+        history_repo = HistoryRepository(self.git_repo())
+        return HistoryQueryService(history_repo, self.config())

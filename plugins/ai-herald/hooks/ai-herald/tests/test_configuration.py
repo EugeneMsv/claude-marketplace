@@ -695,3 +695,114 @@ class TestConfigurationLoaderForwardFillDefaults:
         ConfigurationLoader.load(config_file)
 
         assert config_file.stat().st_mtime == mtime_before
+
+
+class TestConfigurationHistory:
+    """Tests for history_enabled property."""
+
+    def test_history_enabled_default_is_false(self):
+        """Given no history config, history_enabled defaults to False."""
+        config = Configuration(
+            enabled=True,
+            base_branches=["main"],
+            tracked_extensions={".py"},
+            enable_logging=False,
+            log_file="test.log",
+        )
+        assert config.history_enabled is False
+
+    def test_history_enabled_when_set_true(self):
+        """Given history_enabled=True, property returns True."""
+        config = Configuration(
+            enabled=True,
+            base_branches=["main"],
+            tracked_extensions={".py"},
+            enable_logging=False,
+            log_file="test.log",
+            history_enabled=True,
+        )
+        assert config.history_enabled is True
+
+    def test_history_enabled_explicit_false(self):
+        """Given history_enabled=False explicitly, property returns False."""
+        config = Configuration(
+            enabled=True,
+            base_branches=["main"],
+            tracked_extensions={".py"},
+            enable_logging=False,
+            log_file="test.log",
+            history_enabled=False,
+        )
+        assert config.history_enabled is False
+
+
+class TestConfigurationLoaderHistory:
+    """Tests for ConfigurationLoader loading history settings."""
+
+    def test_load_with_history_enabled_true(self, tmp_path):
+        """Given config with history.enabled=true, loads correctly."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "enabled": True,
+            "base_branches": ["main"],
+            "tracked_extensions": [".py"],
+            "enable_logging": False,
+            "log_file": "test.log",
+            "history": {"enabled": True},
+        }))
+
+        config = ConfigurationLoader.load(config_file)
+
+        assert config.history_enabled is True
+
+    def test_load_with_history_enabled_false(self, tmp_path):
+        """Given config with history.enabled=false, loads correctly."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "enabled": True,
+            "base_branches": ["main"],
+            "tracked_extensions": [".py"],
+            "enable_logging": False,
+            "log_file": "test.log",
+            "history": {"enabled": False},
+        }))
+
+        config = ConfigurationLoader.load(config_file)
+
+        assert config.history_enabled is False
+
+    def test_load_without_history_section_defaults_to_false(self, tmp_path):
+        """Given config missing history section, history_enabled defaults to False."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "enabled": True,
+            "base_branches": ["main"],
+            "tracked_extensions": [".py"],
+            "enable_logging": False,
+            "log_file": "test.log",
+        }))
+
+        config = ConfigurationLoader.load(config_file)
+
+        assert config.history_enabled is False
+
+    def test_default_config_has_history_disabled(self):
+        """DEFAULT_CONFIG has history.enabled=False."""
+        assert ConfigurationLoader.DEFAULT_CONFIG["history"]["enabled"] is False
+
+    def test_forward_fill_adds_history_key_to_old_config(self, tmp_path):
+        """Given old config without history section, forward-fill adds it."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "enabled": True,
+            "base_branches": ["main"],
+            "tracked_extensions": [".py"],
+            "enable_logging": False,
+            "log_file": "test.log",
+        }))
+
+        ConfigurationLoader.load(config_file)
+
+        on_disk = json.loads(config_file.read_text())
+        assert "history" in on_disk
+        assert on_disk["history"]["enabled"] is False

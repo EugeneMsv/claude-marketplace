@@ -15,6 +15,7 @@ Watches every AI write, then announces attribution stats at commit time — inje
 - [Missed Commit Recovery](#missed-commit-recovery)
 - [Automatic Housekeeping](#automatic-housekeeping)
 - [On-Demand Stats (`/ai-herald-stats`)](#on-demand-stats-ai-herald-stats)
+- [Historical Trend Analytics (`/ai-herald-history`)](#historical-trend-analytics-ai-herald-history)
 - [Example](#example)
 - [Tracking Files](#tracking-files)
 - [Disabling](#disabling)
@@ -55,6 +56,7 @@ Before using AI Herald, ensure the following requirements are met:
 - **Automatic Housekeeping**: Cleans up stale tracking files for deleted/merged branches
 - **Ignored Files Exclusion**: Files matching configurable Ant-style glob patterns (e.g. `**/generated/**`) are tracked separately as Ignored and excluded from AI/Human percentages
 - **On-Demand Stats**: Query current branch AI contribution stats at any time without committing — invoke `/ai-herald-stats` or ask Claude to show AI attribution stats
+- **Historical Trend Analytics**: Opt-in per-commit history store (`history.enabled: true`); query AI usage trends over time with `/ai-herald-history` — grouped by week, month, or commit with table, JSON, or CSV output
 - **Configurable**: Support for multiple base branches, file extensions, and logging
 
 ## Current Limitations
@@ -303,6 +305,7 @@ Edit `config.json` to customize:
     ]
   }
   ```
+- `history.enabled` - Append a JSONL record to `~/.claude/ai-herald/history/{repo}.jsonl` after each successful commit injection (default: false). Must be opted into — no data is written until this is set to `true`.
 
 ## MR Title Stats, Auto-Creation & Labeling
 
@@ -538,7 +541,14 @@ Query current branch AI contribution stats at any time — without making a comm
 /ai-herald-stats
 ```
 
-Or ask Claude: _"show AI attribution stats"_, _"what is the AI percentage"_, _"how much did AI contribute"_.
+Or ask Claude anything like:
+
+| What you say | Runs |
+|---|---|
+| _"show AI attribution stats"_ | default table output |
+| _"what is the AI percentage?"_ | default table output |
+| _"how many lines did Claude write?"_ | default table output |
+| _"show AI stats as JSON"_ | `--json` |
 
 For JSON output:
 
@@ -547,6 +557,94 @@ python3 $CLAUDE_PLUGIN_ROOT/skills/ai-herald-stats/herald-query-stats.py --json
 ```
 
 The script exits cleanly with an informational message when AI Herald is disabled, not in a git repository, or no tracking data exists for the current branch.
+
+## Historical Trend Analytics (`/ai-herald-history`)
+
+Track how AI usage has evolved across past commits — week-by-week, month-by-month, or per-commit.
+
+> **Opt-in feature.** No data is written until `history.enabled` is set to `true` in config.
+
+### Enable
+
+```json
+{
+  "history": {
+    "enabled": true
+  }
+}
+```
+
+Once enabled, each successful commit injection appends one JSONL record to `~/.claude/ai-herald/history/{repo-identity}.jsonl`. The file is append-only and safe for concurrent writes.
+
+### Query
+
+**Invoke with:**
+
+```
+/ai-herald-history
+```
+
+Or ask Claude anything like:
+
+| What you say | Maps to |
+|---|---|
+| _"show AI history"_ | default (`--by week`, all time) |
+| _"show AI history for the last 4 weeks"_ | `--since 4w` |
+| _"show AI history since January"_ | `--since 2026-01-01` |
+| _"show AI history grouped by month"_ | `--by month` |
+| _"show AI history per commit"_ | `--by commit` |
+| _"show AI history for alice@example.com"_ | `--author alice@example.com` |
+| _"show AI history as JSON"_ | `--format json` |
+| _"last 8 weeks of AI history, by month, for alice"_ | `--since 8w --by month --author alice@example.com` |
+
+**CLI directly:**
+
+```bash
+# Weekly breakdown (default)
+python3 $CLAUDE_PLUGIN_ROOT/skills/ai-herald-history/herald-history.py
+
+# Last 8 weeks
+python3 $CLAUDE_PLUGIN_ROOT/skills/ai-herald-history/herald-history.py --since 8w
+
+# Monthly, since start of year
+python3 $CLAUDE_PLUGIN_ROOT/skills/ai-herald-history/herald-history.py --by month --since 2026-01-01
+
+# Per-commit for one author
+python3 $CLAUDE_PLUGIN_ROOT/skills/ai-herald-history/herald-history.py --by commit --author alice@example.com
+
+# JSON output for scripting
+python3 $CLAUDE_PLUGIN_ROOT/skills/ai-herald-history/herald-history.py --json
+```
+
+### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--by week\|month\|commit` | `week` | Grouping period |
+| `--since 30d\|4w\|3m\|YYYY-MM-DD` | (all time) | Filter records by date |
+| `--author EMAIL` | (all) | Filter by author email |
+| `--format table\|json\|csv` | `table` | Output format |
+| `--json` | — | Shorthand for `--format=json` |
+
+### Sample Output
+
+```
+AI Contribution History — github.com_alice_my-repo
+
+Week         Commits  AI%    Added                   Removed               Ignored
+-----------  -------  -----  ----------------------  --------------------  -------
+2026-01-12   3        45%    +180 / +99 AI           -40 / -12 AI          0 lines
+2026-01-19   5        58%    +310 / +180 AI          -55 / -28 AI          8 lines (**/generated/**)
+2026-01-26   8        71%    +420 / +298 AI          -80 / -51 AI          0 lines
+
+Trend: ▲ +26pp over 3 weeks  |  Total: 16 commits  |  Avg AI%: 58%
+```
+
+### Storage
+
+Records are stored in `~/.claude/ai-herald/history/{repo-identity}.jsonl` — one JSON object per line. The repo identity is derived from `git remote get-url origin` (e.g. `github.com_alice_my-repo.jsonl`). For repos without a remote, falls back to a SHA256 hash of the repo path.
+
+Each record includes: commit hash, subject, timestamp, branch, author email, herald version, file counts, line counts by AI/human/ignored, and per-extension breakdown.
 
 ## Example
 
@@ -736,15 +834,21 @@ Per-branch tracking files are stored in `.claude/herald/{branch}.json`:
 - `herald-pre-writer.py` - Write pre-hook entry point (PreToolUse Write - snapshots file before overwrite)
 - `herald-bash-delete.py` - Bash file deletion hook entry point (PostToolUse Bash - detects `rm`/`git rm`/`unlink` and marks deleted files as AI-deleted)
 - `config.json` - Configuration
-- `domain/` - Business logic (LineHasher, Diff, TrackingData, ContributionStats, FormatSnapshot, TokenNormalizer, IgnoredFilesDetector)
-- `infrastructure/` - Git, GitLab, and file operations (GitRepository, GlabRepository, TrackingRepository, Configuration)
-- `services/` - Workflow coordination (CaptureService, InjectService, MrService, StatsCalculator, FormatSnapshotService, FormatTrackerService, DeletionTrackerService, DeletionTargetsDetector)
+- `domain/` - Business logic (LineHasher, Diff, TrackingData, ContributionStats, FormatSnapshot, TokenNormalizer, IgnoredFilesDetector, HistoryRecord)
+- `infrastructure/` - Git, GitLab, and file operations (GitRepository, GlabRepository, TrackingRepository, HistoryRepository, Configuration)
+- `services/` - Workflow coordination (CaptureService, InjectService, MrService, StatsCalculator, FormatSnapshotService, FormatTrackerService, DeletionTrackerService, DeletionTargetsDetector, HistoryAppendService, HistoryQueryService)
 - `tests/` - Unit tests
 - `ai-herald.log` - Debug log (if logging enabled)
 
 ## Skills
 
+| Skill | Slash command | Supports options |
+|-------|--------------|-----------------|
+| `ai-herald-stats` | `/ai-herald-stats` | `--json` — ask _"show AI stats as JSON"_ |
+| `ai-herald-history` | `/ai-herald-history` | `--since`, `--by`, `--author`, `--format` — ask e.g. _"show last 4 weeks by month for alice@example.com"_ |
+
 - `skills/ai-herald-stats/herald-query-stats.py` - On-demand stats query script (invoked by `/ai-herald-stats`)
+- `skills/ai-herald-history/herald-history.py` - Historical trend query script (invoked by `/ai-herald-history`)
 
 ## Testing
 

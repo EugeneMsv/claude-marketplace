@@ -16,7 +16,7 @@ from domain.tracking_data import TrackingData
 from infrastructure.configuration import Configuration
 from infrastructure.git_repository import GitRepository
 from infrastructure.tracking_repository import TrackingRepository
-from services.query_stats_service import QueryStatsService
+from services.query.query_stats_service import QueryStatsService
 from services.stats_calculator import StatsCalculator
 
 

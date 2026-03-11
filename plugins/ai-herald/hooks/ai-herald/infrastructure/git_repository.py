@@ -213,6 +213,94 @@ class GitRepository:
         except subprocess.CalledProcessError:
             return False
 
+    def get_remote_url(self) -> Optional[str]:
+        """Get the remote URL for origin.
+
+        Returns:
+            Remote URL string, or None if no remote or on error
+        """
+        try:
+            result = subprocess.run(
+                ['git', 'remote', 'get-url', 'origin'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            return result.stdout.strip() or None
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return None
+
+    def get_head_commit_timestamp(self) -> Optional[str]:
+        """Get the author timestamp of the current HEAD commit in ISO 8601 format.
+
+        Returns:
+            ISO 8601 timestamp string (e.g. '2026-02-10T14:22:00+00:00'), or None on error
+        """
+        try:
+            result = subprocess.run(
+                ['git', 'log', '-1', '--format=%aI', 'HEAD'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            return result.stdout.strip() or None
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return None
+
+    def get_head_commit_subject(self) -> Optional[str]:
+        """Get the subject line (first line) of the current HEAD commit.
+
+        Returns:
+            Commit subject string, or None on error
+        """
+        try:
+            result = subprocess.run(
+                ['git', 'log', '-1', '--format=%s', 'HEAD'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            return result.stdout.strip() or None
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return None
+
+    def get_author_email(self) -> Optional[str]:
+        """Get the configured git author email.
+
+        Returns:
+            Author email string, or None if not configured or on error
+        """
+        try:
+            result = subprocess.run(
+                ['git', 'config', 'user.email'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            return result.stdout.strip() or None
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return None
+
+    def get_changed_file_count(self, merge_base: str) -> int:
+        """Count the number of files changed since merge_base.
+
+        Args:
+            merge_base: Commit hash to diff against
+
+        Returns:
+            Number of changed files, or 0 on error
+        """
+        try:
+            result = subprocess.run(
+                ['git', 'diff', '--name-only', merge_base, 'HEAD'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            return sum(1 for line in result.stdout.splitlines() if line.strip())
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return 0
+
     @staticmethod
     def sanitize_branch_name(branch: str) -> str:
         """Sanitize branch name for use in filenames.

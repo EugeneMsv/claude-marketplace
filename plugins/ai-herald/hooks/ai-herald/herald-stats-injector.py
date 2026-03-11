@@ -39,6 +39,15 @@ def _handle(provider: DependencyProvider, hook_output: HookOutputService) -> Non
         # Recovery path: push after failed chained commit
         result = service.recover_missed_commit()
 
+    # Append to history if inject succeeded and history is enabled
+    if result.success and result.stats is not None and result.tracking is not None:
+        if provider.config().history_enabled:
+            try:
+                history_service = provider.build_history_append_service()
+                history_service.append_commit(result.stats, result.tracking)
+            except Exception as e:
+                provider.logger().warning(f"History append failed: {e}")
+
     # Run housekeeping if enabled
     if provider.config().housekeeping_enabled:
         try:

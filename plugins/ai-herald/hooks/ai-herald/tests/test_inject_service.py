@@ -285,3 +285,93 @@ class TestProcessCommitClearsPendingFlag:
         assert result.success
         loaded = repo.load()
         assert loaded.pending_inject_head is None
+
+
+class TestInjectResultStatsAndTracking:
+    """Tests that InjectResult carries stats and tracking on success."""
+
+    def test_successful_inject_populates_stats(self, service, git_repo, git_root, stats_calculator):
+        """Given successful inject, result.stats is the computed ContributionStats."""
+        git_repo.get_root.return_value = git_root
+        git_repo.get_head_commit_message.return_value = "Fix bug"
+        git_repo.amend_commit_message.return_value = True
+
+        expected_stats = _make_stats(ai_pct=75.0)
+        stats_calculator.calculate.return_value = expected_stats
+
+        tracking = TrackingData("feature-branch")
+        tracking.files_tracked = ["file.py"]
+        TrackingRepository(git_root, "feature-branch").save(tracking)
+
+        result = service.process_commit()
+
+        assert result.success
+        assert result.stats is expected_stats
+
+    def test_successful_inject_populates_tracking(self, service, git_repo, git_root):
+        """Given successful inject, result.tracking is the TrackingData used."""
+        git_repo.get_root.return_value = git_root
+        git_repo.get_head_commit_message.return_value = "Fix bug"
+        git_repo.amend_commit_message.return_value = True
+
+        tracking = TrackingData("feature-branch")
+        tracking.files_tracked = ["a.py", "b.py"]
+        TrackingRepository(git_root, "feature-branch").save(tracking)
+
+        result = service.process_commit()
+
+        assert result.success
+        assert result.tracking is not None
+        assert result.tracking.branch == "feature-branch"
+
+    def test_failed_inject_stats_is_none(self, service, git_repo, git_root):
+        """Given amend fails, result.stats is None."""
+        git_repo.get_root.return_value = git_root
+        git_repo.get_head_commit_message.return_value = "Fix bug"
+        git_repo.amend_commit_message.return_value = False
+
+        tracking = TrackingData("feature-branch")
+        tracking.files_tracked = ["file.py"]
+        TrackingRepository(git_root, "feature-branch").save(tracking)
+
+        result = service.process_commit()
+
+        assert not result.success
+        assert result.stats is None
+
+    def test_failed_inject_tracking_is_none(self, service, git_repo, git_root):
+        """Given amend fails, result.tracking is None."""
+        git_repo.get_root.return_value = git_root
+        git_repo.get_head_commit_message.return_value = "Fix bug"
+        git_repo.amend_commit_message.return_value = False
+
+        tracking = TrackingData("feature-branch")
+        tracking.files_tracked = ["file.py"]
+        TrackingRepository(git_root, "feature-branch").save(tracking)
+
+        result = service.process_commit()
+
+        assert not result.success
+        assert result.tracking is None
+
+    def test_recover_missed_commit_populates_stats_on_success(
+        self, service, git_repo, git_root, stats_calculator
+    ):
+        """Given recovery inject succeeds, result.stats is populated."""
+        git_repo.get_root.return_value = git_root
+        git_repo.get_head_commit_hash.return_value = "newhead"
+        git_repo.get_head_commit_message.return_value = "Fix bug"
+        git_repo.amend_commit_message.return_value = True
+
+        expected_stats = _make_stats(ai_pct=90.0)
+        stats_calculator.calculate.return_value = expected_stats
+
+        tracking = TrackingData("feature-branch")
+        tracking.pending_inject_head = "oldhead"
+        tracking.files_tracked = ["file.py"]
+        TrackingRepository(git_root, "feature-branch").save(tracking)
+
+        result = service.recover_missed_commit()
+
+        assert result.success
+        assert result.stats is expected_stats
