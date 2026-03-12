@@ -37,12 +37,6 @@ class ChangeCaptorHook(HookRunner):
         else:
             success = service.process_edit(tool_input)
 
-        if provider.config().enable_logging:
-            if success:
-                provider.logger().info("Successfully processed tool use")
-            else:
-                provider.logger().info("Skipped (not applicable)")
-
         if success:
             file_path = tool_input.get('file_path', '')
             if file_path:

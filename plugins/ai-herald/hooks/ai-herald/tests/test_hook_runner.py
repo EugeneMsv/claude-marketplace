@@ -1,14 +1,14 @@
-"""Tests for run_hook() entry-point helper."""
+"""Tests for HookRunner._run_hook() lifecycle."""
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from infrastructure.hook_runner import run_hook
+from infrastructure.hook_runner import HookRunner
 from infrastructure.dependency_provider import DependencyProvider
 from infrastructure.hook_output_service import HookOutputService
 
@@ -19,6 +19,17 @@ def _make_provider_mock(enable_logging=False):
     config.enable_logging = enable_logging
     provider.config.return_value = config
     return provider
+
+
+def _make_hook(handler_fn):
+    """Create a minimal HookRunner subclass that delegates _handle to handler_fn."""
+    class TestHook(HookRunner):
+        hook_name = 'TEST'
+
+        def _handle(self, provider, hook_output):
+            handler_fn(provider, hook_output)
+
+    return TestHook()
 
 
 class TestRunHookNormalPath:
@@ -42,7 +53,7 @@ class TestRunHookNormalPath:
         mock_output.exit_with_success.side_effect = SystemExit(0)
 
         with pytest.raises(SystemExit) as exc:
-            run_hook('TEST', handler)
+            _make_hook(handler).run()
 
         assert exc.value.code == 0
         assert len(calls) == 1
@@ -60,8 +71,14 @@ class TestRunHookNormalPath:
         mock_output_cls.return_value = mock_output
         mock_provider_cls.return_value = _make_provider_mock()
 
+        class MyHook(HookRunner):
+            hook_name = 'MY-HOOK'
+
+            def _handle(self, provider, hook_output):
+                pass
+
         with pytest.raises(SystemExit):
-            run_hook('MY-HOOK', lambda p, o: None)
+            MyHook().run()
 
         mock_provider_cls.assert_called_once_with('MY-HOOK')
 
@@ -86,7 +103,7 @@ class TestRunHookDisabledConfig:
             handler_called.append(True)
 
         with pytest.raises(SystemExit) as exc:
-            run_hook('TEST', handler)
+            _make_hook(handler).run()
 
         assert exc.value.code == 0
         assert not handler_called
@@ -111,7 +128,7 @@ class TestRunHookExceptionHandling:
             raise ValueError("something broke")
 
         with pytest.raises(SystemExit) as exc:
-            run_hook('TEST', failing_handler)
+            _make_hook(failing_handler).run()
 
         assert exc.value.code == 0
         mock_output.exit_with_success.assert_called_once_with()
@@ -131,7 +148,7 @@ class TestRunHookExceptionHandling:
             raise KeyboardInterrupt()
 
         with pytest.raises(KeyboardInterrupt):
-            run_hook('TEST', interrupt_handler)
+            _make_hook(interrupt_handler).run()
 
     @patch("infrastructure.hook_runner.HookOutputService")
     @patch("infrastructure.hook_runner.DependencyProvider")
@@ -149,8 +166,8 @@ class TestRunHookExceptionHandling:
             hook_output.exit_with_success("early")
 
         with pytest.raises(SystemExit) as exc:
-            run_hook('TEST', early_exit_handler)
+            _make_hook(early_exit_handler).run()
 
         assert exc.value.code == 0
-        # exit_with_success called once (from handler), not a second time by run_hook
+        # exit_with_success called once (from handler), not a second time by _run_hook
         mock_output.exit_with_success.assert_called_once_with("early")

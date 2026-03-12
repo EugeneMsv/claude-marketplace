@@ -9,40 +9,6 @@ from infrastructure.dependency_provider import DependencyProvider
 from infrastructure.hook_output_service import HookOutputService
 
 
-def run_hook(
-    hook_name: str,
-    handler: Callable[[DependencyProvider, HookOutputService], None]
-) -> None:
-    """Run a hook handler with standard setup, error handling, and exit.
-
-    Sets up version, hook_output, and provider, then delegates to handler.
-    On exception, logs the error (if logging is enabled) and exits cleanly.
-    SystemExit and KeyboardInterrupt are never swallowed — they propagate.
-
-    Args:
-        hook_name: Identifier used as logger prefix (e.g. 'CAPTURE', 'INJECT')
-        handler: Callable that receives (provider, hook_output) and performs
-                 the hook's business logic. May call hook_output.exit_with_success()
-                 directly for early exits.
-    """
-    version = ConfigurationLoader.resolve_plugin_version()
-    hook_output = HookOutputService(version)
-    provider = DependencyProvider(hook_name)
-
-    try:
-        if not provider.config().enabled:
-            hook_output.exit_with_success()
-        handler(provider, hook_output)
-    except Exception as e:
-        try:
-            if provider.config().enable_logging:
-                provider.logger().error(f"Hook failed: {e}", exc_info=True)
-        except Exception:
-            pass  # logger itself failed — cannot do more
-
-    hook_output.exit_with_success()
-
-
 # Type alias for module-level command handler functions
 CommandHandler = Callable[[DependencyProvider, str], Optional[Any]]
 
@@ -51,14 +17,46 @@ class HookRunner:
     """Base class for all AI herald hooks.
 
     Subclasses declare ``hook_name`` and implement ``_handle``.
-    ``run()`` is the universal entry point that wires into ``run_hook``.
+    ``run()`` is the universal entry point that wires into ``_run_hook``.
     """
 
     hook_name: ClassVar[str]
 
     def run(self) -> None:
-        """Universal entry point — wraps the run_hook lifecycle."""
-        run_hook(self.hook_name, self._handle)
+        """Universal entry point — runs the hook lifecycle."""
+        self._run_hook(self._handle)
+
+    def _run_hook(
+        self,
+        handler: Callable[[DependencyProvider, HookOutputService], None]
+    ) -> None:
+        """Run a hook handler with standard setup, error handling, and exit.
+
+        Sets up version, hook_output, and provider, then delegates to handler.
+        On exception, logs the error (if logging is enabled) and exits cleanly.
+        SystemExit and KeyboardInterrupt are never swallowed — they propagate.
+
+        Args:
+            handler: Callable that receives (provider, hook_output) and performs
+                     the hook's business logic. May call hook_output.exit_with_success()
+                     directly for early exits.
+        """
+        version = ConfigurationLoader.resolve_plugin_version()
+        hook_output = HookOutputService(version)
+        provider = DependencyProvider(self.hook_name)
+
+        try:
+            if not provider.config().enabled:
+                hook_output.exit_with_success()
+            handler(provider, hook_output)
+        except Exception as e:
+            try:
+                if provider.config().enable_logging:
+                    provider.logger().error(f"Hook failed: {e}", exc_info=True)
+            except Exception:
+                pass  # logger itself failed — cannot do more
+
+        hook_output.exit_with_success()
 
     def _handle(self, provider: DependencyProvider, hook_output: HookOutputService) -> None:
         raise NotImplementedError
@@ -68,7 +66,7 @@ class CommandHookRunner(HookRunner):
     """Base class for Bash+DetectedCommand hooks.
 
     Subclasses declare ``command_handlers`` mapping DetectedCommand values to
-    module-level handler functions with signature ``(provider, command) -> Optional[Any]``.
+    instance method handlers with signature ``(self, provider, command) -> Optional[Any]``.
     Override ``on_result`` for post-dispatch logic (e.g. formatting output messages).
     """
 
