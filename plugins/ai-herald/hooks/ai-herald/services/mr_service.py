@@ -81,6 +81,10 @@ class MrService:
         Returns:
             MrResult with success status and AI percentage if successful
         """
+        if not self._config.mr_features_enabled:
+            self._logger.info("All MR features disabled in config")
+            return MrResult(False)
+
         self._logger.info("Git push command detected")
 
         # Get current branch
@@ -135,7 +139,13 @@ class MrService:
         if success:
             self._logger.info("=== MR updated ===")
         ai_percentage = int(round(stats.ai_percentage)) if success else None
-        return MrResult(success, ai_percentage)
+        result = MrResult(success, ai_percentage)
+        if self._config.enable_logging:
+            if result.success:
+                self._logger.info("MR updated successfully")
+            else:
+                self._logger.info("Skipped (not applicable)")
+        return result
 
     def _auto_create_mr(self, branch: str) -> MrResult:
         """Auto-create draft MR for branch.

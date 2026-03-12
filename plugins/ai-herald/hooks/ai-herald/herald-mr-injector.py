@@ -24,9 +24,6 @@ class MrInjectorHook(CommandHookRunner):
     hook_name = 'MR-UPDATE'
 
     def _handle_git_push(self, provider: DependencyProvider, _command: str):
-        if not provider.config().mr_features_enabled:
-            provider.logger().info("All MR features disabled in config")
-            return None
         return provider.build_mr_service().process_push()
 
     command_handlers = {DetectedCommand.GIT_PUSH: _handle_git_push}
@@ -35,12 +32,6 @@ class MrInjectorHook(CommandHookRunner):
         if result is None:
             hook_output.exit_with_success()
             return
-
-        if provider.config().enable_logging:
-            if result.success:
-                provider.logger().info("MR updated successfully")
-            else:
-                provider.logger().info("Skipped (not applicable)")
 
         if result.message:
             hook_output.exit_with_success(result.message)
