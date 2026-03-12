@@ -23,13 +23,8 @@ class HookRunner:
     hook_name: ClassVar[str]
 
     def run(self) -> None:
-        """Universal entry point — runs the hook lifecycle."""
-        self._run_hook()
+        """Universal entry point — runs the hook with standard setup, error handling, and exit.
 
-    def _run_hook(self) -> None:
-        """Run the hook with standard setup, error handling, and exit.
-
-        Sets up version, hook_output, and provider, then delegates to _handle.
         On exception, logs the error (if logging is enabled) and exits cleanly.
         SystemExit and KeyboardInterrupt are never swallowed — they propagate.
         """
