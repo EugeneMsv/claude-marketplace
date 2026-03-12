@@ -22,7 +22,7 @@ def _make_provider_mock(enable_logging=False):
 
 
 def _make_hook(handler_fn):
-    """Create a minimal HookRunner subclass that delegates _handle to handler_fn."""
+    """Create a minimal HookRunner subclass with the given _handle body."""
     class TestHook(HookRunner):
         hook_name = 'TEST'
 

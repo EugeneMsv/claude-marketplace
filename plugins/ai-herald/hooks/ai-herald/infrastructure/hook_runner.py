@@ -24,22 +24,14 @@ class HookRunner:
 
     def run(self) -> None:
         """Universal entry point — runs the hook lifecycle."""
-        self._run_hook(self._handle)
+        self._run_hook()
 
-    def _run_hook(
-        self,
-        handler: Callable[[DependencyProvider, HookOutputService], None]
-    ) -> None:
-        """Run a hook handler with standard setup, error handling, and exit.
+    def _run_hook(self) -> None:
+        """Run the hook with standard setup, error handling, and exit.
 
-        Sets up version, hook_output, and provider, then delegates to handler.
+        Sets up version, hook_output, and provider, then delegates to _handle.
         On exception, logs the error (if logging is enabled) and exits cleanly.
         SystemExit and KeyboardInterrupt are never swallowed — they propagate.
-
-        Args:
-            handler: Callable that receives (provider, hook_output) and performs
-                     the hook's business logic. May call hook_output.exit_with_success()
-                     directly for early exits.
         """
         version = ConfigurationLoader.resolve_plugin_version()
         hook_output = HookOutputService(version)
@@ -48,7 +40,7 @@ class HookRunner:
         try:
             if not provider.config().enabled:
                 hook_output.exit_with_success()
-            handler(provider, hook_output)
+            self._handle(provider, hook_output)
         except Exception as e:
             try:
                 if provider.config().enable_logging:
