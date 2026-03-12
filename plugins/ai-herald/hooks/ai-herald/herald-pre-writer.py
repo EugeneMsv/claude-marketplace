@@ -17,22 +17,25 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from infrastructure.dependency_provider import DependencyProvider
 from infrastructure.hook_output_service import HookOutputService
-from infrastructure.hook_runner import run_hook
+from infrastructure.hook_runner import HookRunner
 
 
-def _handle(provider: DependencyProvider, hook_output: HookOutputService) -> None:
-    input_data = json.load(sys.stdin)
-    file_path = input_data.get('tool_input', {}).get('file_path', '')
+class PreWriterHook(HookRunner):
+    hook_name = 'WRITE-PRE'
 
-    if not file_path:
-        hook_output.exit_with_success()
+    def _handle(self, provider: DependencyProvider, hook_output: HookOutputService) -> None:
+        input_data = json.load(sys.stdin)
+        file_path = input_data.get('tool_input', {}).get('file_path', '')
 
-    provider.build_capture_service().store_pre_write_snapshot(file_path)
+        if not file_path:
+            hook_output.exit_with_success()
+
+        provider.build_capture_service().store_pre_write_snapshot(file_path)
 
 
 def main():
     """Snapshot existing file content before Write tool runs."""
-    run_hook('WRITE-PRE', _handle)
+    PreWriterHook().run()
 
 
 if __name__ == '__main__':

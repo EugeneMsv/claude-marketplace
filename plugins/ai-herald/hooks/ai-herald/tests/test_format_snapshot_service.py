@@ -45,14 +45,14 @@ def _make_service(git_root: Path, branch: str = "feature/test", logger=None):
 
 
 class TestCapturePreFormat:
-    """Tests for capture_pre_format(pid)."""
+    """Tests for capture_pre_format()."""
 
     def test_returns_none_when_no_tracking_data(self, temp_dir):
         """Given no tracking file, returns None without error."""
         (temp_dir / ".claude").mkdir()
         service = _make_service(temp_dir)
 
-        result = service.capture_pre_format(pid=1234)
+        result = service.capture_pre_format()
 
         assert result is None
 
@@ -66,7 +66,7 @@ class TestCapturePreFormat:
         tracking = TrackingData("feature/test")
         tracking_repo.save(tracking)
 
-        result = service.capture_pre_format(pid=1234)
+        result = service.capture_pre_format()
 
         assert result is None
 
@@ -88,11 +88,11 @@ class TestCapturePreFormat:
         tracking.add_ai_lines("app.py", ["def foo():", "    pass"], hasher)
         tracking_repo.save(tracking)
 
-        result = service.capture_pre_format(pid=9999)
+        result = service.capture_pre_format()
 
         assert result is not None
         assert Path(result).exists()
-        assert "9999.json" in result
+        assert result.endswith('.json')
 
     def test_returns_none_when_no_branch(self, temp_dir):
         """Given git_repo returns no branch, returns None."""
@@ -101,7 +101,7 @@ class TestCapturePreFormat:
         git_repo.get_current_branch.return_value = None
         service = FormatSnapshotService(git_repo, MagicMock(), LineHasher(), logging.getLogger("test"))
 
-        result = service.capture_pre_format(pid=1)
+        result = service.capture_pre_format()
 
         assert result is None
 
@@ -112,6 +112,6 @@ class TestCapturePreFormat:
         git_repo.get_current_branch.return_value = "feature/test"
         service = FormatSnapshotService(git_repo, MagicMock(), LineHasher(), logging.getLogger("test"))
 
-        result = service.capture_pre_format(pid=1)
+        result = service.capture_pre_format()
 
         assert result is None

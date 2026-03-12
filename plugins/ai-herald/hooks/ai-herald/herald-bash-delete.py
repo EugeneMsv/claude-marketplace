@@ -9,7 +9,6 @@ marks any matched files as AI-deleted in the tracking data.
 Hook Event: PostToolUse Bash
 """
 
-import json
 import sys
 from pathlib import Path
 
@@ -18,29 +17,28 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from infrastructure.dependency_provider import DependencyProvider
 from infrastructure.hook_output_service import HookOutputService
-from infrastructure.hook_runner import run_hook
+from infrastructure.hook_runner import CommandHookRunner
 from services.bash_command_detector import DetectedCommand
 
 
-def _handle(provider: DependencyProvider, hook_output: HookOutputService) -> None:
-    input_data = json.load(sys.stdin)
-    command = input_data.get('tool_input', {}).get('command', '')
+class BashDeleteHook(CommandHookRunner):
+    hook_name = 'BASH-DELETE'
 
-    if DetectedCommand.BASH_FILE_DELETION not in provider.bash_command_detector().detect_commands(command):
-        hook_output.exit_with_success()
+    def _handle_bash_deletion(self, provider: DependencyProvider, command: str):
+        return provider.build_deletion_tracker_service().process(command)
 
-    targets = provider.deletion_targets_detector().detect(command)
-    deleted = provider.build_deletion_tracker_service().process(targets)
+    command_handlers = {DetectedCommand.BASH_FILE_DELETION: _handle_bash_deletion}
 
-    if deleted:
-        hook_output.exit_with_success(f"✓ {len(deleted)} file(s) marked AI-deleted")
-    else:
-        hook_output.exit_with_success()
+    def on_result(self, provider: DependencyProvider, hook_output: HookOutputService, result) -> None:
+        if result:
+            hook_output.exit_with_success(f"✓ {len(result)} file(s) marked AI-deleted")
+        else:
+            hook_output.exit_with_success()
 
 
 def main():
     """Main entry point for bash delete hook."""
-    run_hook('BASH-DELETE', _handle)
+    BashDeleteHook().run()
 
 
 if __name__ == '__main__':

@@ -46,16 +46,15 @@ class FormatTrackerService:
         self._token_normalizer = token_normalizer
         self._logger = logger
 
-    def process_post_format(self, pid: int) -> bool:
+    def process_post_format(self) -> bool:
         """
         Process formatting completion and update attribution.
-
-        Args:
-            pid: Process ID of the command
 
         Returns:
             True if processing succeeded
         """
+        pid = os.getppid()
+
         # Get git root
         git_root = self._git_repo.get_root()
         if not git_root:

@@ -51,7 +51,7 @@ class TestHandleMissingFilePath:
 
         with patch('sys.stdin', _make_stdin({})):
             with pytest.raises(SystemExit) as exc:
-                module._handle(provider, hook_output)
+                module.PreWriterHook()._handle(provider, hook_output)
 
         assert exc.value.code == 0
         capture_service.store_pre_write_snapshot.assert_not_called()
@@ -63,7 +63,7 @@ class TestHandleMissingFilePath:
 
         with patch('sys.stdin', _make_stdin({'file_path': ''})):
             with pytest.raises(SystemExit) as exc:
-                module._handle(provider, hook_output)
+                module.PreWriterHook()._handle(provider, hook_output)
 
         assert exc.value.code == 0
         capture_service.store_pre_write_snapshot.assert_not_called()
@@ -79,7 +79,7 @@ class TestHandleWithFilePath:
         file_path = '/project/src/app.py'
 
         with patch('sys.stdin', _make_stdin({'file_path': file_path})):
-            module._handle(provider, hook_output)
+            module.PreWriterHook()._handle(provider, hook_output)
 
         capture_service.store_pre_write_snapshot.assert_called_once_with(file_path)
 
@@ -89,7 +89,7 @@ class TestHandleWithFilePath:
         provider, hook_output, capture_service = _make_provider_and_output()
 
         with patch('sys.stdin', _make_stdin({'file_path': '/project/app.py'})):
-            module._handle(provider, hook_output)
+            module.PreWriterHook()._handle(provider, hook_output)
 
         provider.build_capture_service.assert_called_once()
 

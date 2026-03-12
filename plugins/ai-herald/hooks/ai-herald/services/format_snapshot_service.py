@@ -1,5 +1,6 @@
 """Format snapshot service for capturing pre-format state."""
 
+import os
 from logging import Logger
 from pathlib import Path
 from typing import Dict, Optional
@@ -42,12 +43,9 @@ class FormatSnapshotService:
         self._hasher = hasher
         self._logger = logger
 
-    def capture_pre_format(self, pid: int) -> Optional[str]:
+    def capture_pre_format(self) -> Optional[str]:
         """
         Capture file state before formatting command runs.
-
-        Args:
-            pid: Process ID of the command
 
         Returns:
             Path to snapshot file if successful, None otherwise
@@ -72,6 +70,7 @@ class FormatSnapshotService:
             self._logger.info("No tracked files, skipping snapshot")
             return None
 
+        pid = os.getppid()
         snapshot = FormatSnapshot.create_new(pid, branch)
 
         for file_path in tracking.files_tracked:

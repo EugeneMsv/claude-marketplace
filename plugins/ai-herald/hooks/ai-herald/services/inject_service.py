@@ -194,7 +194,6 @@ class InjectService:
         Returns:
             InjectResult with success status and AI percentage
         """
-        # Always recalculate merge_base (handles merge/rebase correctly)
         tracking.merge_base = self._git_repo.get_merge_base(self._config.base_branches)
         self._logger.info(f"merge_base: {tracking.merge_base}")
 

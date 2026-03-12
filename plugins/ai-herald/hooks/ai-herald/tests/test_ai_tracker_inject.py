@@ -53,7 +53,7 @@ def _run_main(command: str, enabled: bool = True):
         detect_commands=real_detector.detect_commands,
         detect_commands_ordered=real_detector.detect_commands_ordered,
     )
-    mock_provider.build_inject_service.return_value = mock_service
+    mock_provider.inject_service.return_value = mock_service
     mock_provider.build_branch_sync_service.return_value = MagicMock(handle=MagicMock(return_value=True))
 
     with patch("sys.stdin", StringIO(_make_hook_input(command))), \

@@ -149,6 +149,19 @@ class TestServiceBuilders:
         result = provider.build_inject_service()
         assert isinstance(result, InjectService)
 
+    def test_inject_service_returns_correct_type(self):
+        """inject_service() returns an InjectService."""
+        provider = self._make_provider()
+        result = provider.inject_service()
+        assert isinstance(result, InjectService)
+
+    def test_inject_service_cached(self):
+        """inject_service() returns the same instance on repeated calls."""
+        provider = self._make_provider()
+        s1 = provider.inject_service()
+        s2 = provider.inject_service()
+        assert s1 is s2
+
     def test_build_mr_service_returns_correct_type(self):
         """build_mr_service() returns an MrService."""
         provider = self._make_provider()

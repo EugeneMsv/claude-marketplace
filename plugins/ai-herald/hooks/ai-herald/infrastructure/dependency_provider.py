@@ -40,6 +40,7 @@ class DependencyProvider:
         self._detector = None
         self._deletion_targets_detector = None
         self._ignored_files_detector = None
+        self._inject_service = None
 
     def config(self) -> Configuration:
         """Return cached Configuration, loading it on first call."""
@@ -114,6 +115,12 @@ class DependencyProvider:
             self.build_write_snapshot_repo(), self.ignored_files_detector()
         )
 
+    def inject_service(self) -> 'InjectService':
+        """Return cached InjectService, creating it on first call."""
+        if self._inject_service is None:
+            self._inject_service = self.build_inject_service()
+        return self._inject_service
+
     def build_inject_service(self) -> InjectService:
         """Build and return a fully-wired InjectService."""
         from domain.line_hasher import LineHasher
@@ -150,7 +157,7 @@ class DependencyProvider:
         """Build and return a fully-wired DeletionTrackerService."""
         from services.deletion_tracker_service import DeletionTrackerService
         return DeletionTrackerService(
-            self.git_repo(), self.config(), self.logger()
+            self.git_repo(), self.config(), self.logger(), self.deletion_targets_detector()
         )
 
     def build_query_stats_service(self) -> 'QueryStatsService':

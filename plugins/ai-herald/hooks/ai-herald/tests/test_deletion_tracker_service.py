@@ -15,8 +15,8 @@ from domain.tracking_data import TrackingData
 from infrastructure.tracking_repository import TrackingRepository
 
 
-def _make_service(git_root, branch, git_deleted_files):
-    """Build a DeletionTrackerService with mocked git and tracking."""
+def _make_service(git_root, branch, git_deleted_files, targets=None):
+    """Build a DeletionTrackerService with mocked git, tracking, and detector."""
     git_repo = MagicMock()
     git_repo.get_root.return_value = git_root
     git_repo.get_current_branch.return_value = branch
@@ -24,7 +24,10 @@ def _make_service(git_root, branch, git_deleted_files):
 
     logger = MagicMock()
 
-    service = DeletionTrackerService(git_repo, MagicMock(), logger)
+    detector = MagicMock()
+    detector.detect.return_value = targets if targets is not None else set()
+
+    service = DeletionTrackerService(git_repo, MagicMock(), logger, detector)
 
     # Patch _get_git_deleted_files to return our fixture set
     service._get_git_deleted_files = MagicMock(return_value=set(git_deleted_files))
@@ -37,9 +40,9 @@ class TestProcess:
 
     def test_single_file_marked_ai_deleted(self, tmp_path):
         """Given target file.py in git-deleted, marks it as AI-deleted."""
-        service = _make_service(tmp_path, "feature-branch", ["file.py"])
+        service = _make_service(tmp_path, "feature-branch", ["file.py"], targets={"file.py"})
 
-        matched = service.process({"file.py"})
+        matched = service.process("rm file.py")
 
         assert matched == {"file.py"}
         tracking_repo = TrackingRepository(tmp_path, "feature-branch")
@@ -55,9 +58,9 @@ class TestProcess:
             "src/old/components/forms/validation/rules.ts",
             "src/old/components/utils/helpers/format.ts",
         ]
-        service = _make_service(tmp_path, "feature-branch", git_deleted)
+        service = _make_service(tmp_path, "feature-branch", git_deleted, targets={"src/old/components/"})
 
-        matched = service.process({"src/old/components/"})
+        matched = service.process("rm -rf src/old/components/")
 
         assert matched == set(git_deleted)
         tracking_repo = TrackingRepository(tmp_path, "feature-branch")
@@ -71,50 +74,51 @@ class TestProcess:
             "src/old/file.py",
             "src/other/file.py",  # not under src/old/
         ]
-        service = _make_service(tmp_path, "feature-branch", git_deleted)
+        service = _make_service(tmp_path, "feature-branch", git_deleted, targets={"src/old/"})
 
-        matched = service.process({"src/old/"})
+        matched = service.process("rm -rf src/old/")
 
         assert matched == {"src/old/file.py"}
 
     def test_multiple_targets_some_git_tracked(self, tmp_path):
         """Given multiple targets where only one is git-tracked, only that one is marked."""
-        service = _make_service(tmp_path, "feature-branch", ["a.py"])
+        service = _make_service(tmp_path, "feature-branch", ["a.py"], targets={"a.py", "b.py"})
 
-        matched = service.process({"a.py", "b.py"})
+        matched = service.process("rm a.py b.py")
 
         assert matched == {"a.py"}
 
     def test_empty_targets_returns_empty(self, tmp_path):
-        """Given empty targets set, returns empty and skips git query."""
-        service = _make_service(tmp_path, "feature-branch", [])
+        """Given detector returns empty targets, returns empty and skips git query."""
+        service = _make_service(tmp_path, "feature-branch", [], targets=set())
 
-        matched = service.process(set())
+        matched = service.process("rm file.py")
 
         assert matched == set()
         service._get_git_deleted_files.assert_not_called()
 
     def test_empty_git_deleted_returns_empty(self, tmp_path):
         """Given targets but no git-tracked deleted files, returns empty."""
-        service = _make_service(tmp_path, "feature-branch", [])
+        service = _make_service(tmp_path, "feature-branch", [], targets={"file.py"})
 
-        matched = service.process({"file.py"})
+        matched = service.process("rm file.py")
 
         assert matched == set()
 
     def test_absolute_path_normalized_to_git_relative(self, tmp_path):
         """Given absolute path target, strips git root and matches correctly."""
-        service = _make_service(tmp_path, "feature-branch", ["src/old.py"])
+        abs_path = str(tmp_path / "src/old.py")
+        service = _make_service(tmp_path, "feature-branch", ["src/old.py"], targets={abs_path})
 
-        matched = service.process({str(tmp_path / "src/old.py")})
+        matched = service.process(f"rm {abs_path}")
 
         assert matched == {"src/old.py"}
 
     def test_dot_slash_prefix_stripped(self, tmp_path):
         """Given ./src/file.py target, strips ./ and matches correctly."""
-        service = _make_service(tmp_path, "feature-branch", ["src/file.py"])
+        service = _make_service(tmp_path, "feature-branch", ["src/file.py"], targets={"./src/file.py"})
 
-        matched = service.process({"./src/file.py"})
+        matched = service.process("rm ./src/file.py")
 
         assert matched == {"src/file.py"}
 
@@ -124,8 +128,8 @@ class TestProcess:
         tracking.files_tracked = ["existing.py"]
         TrackingRepository(tmp_path, "feature-branch").save(tracking)
 
-        service = _make_service(tmp_path, "feature-branch", ["deleted.py"])
-        service.process({"deleted.py"})
+        service = _make_service(tmp_path, "feature-branch", ["deleted.py"], targets={"deleted.py"})
+        service.process("rm deleted.py")
 
         loaded = TrackingRepository(tmp_path, "feature-branch").load()
         assert "existing.py" in loaded.files_tracked
@@ -135,9 +139,11 @@ class TestProcess:
         """Given no git root, returns empty set."""
         git_repo = MagicMock()
         git_repo.get_root.return_value = None
-        service = DeletionTrackerService(git_repo, MagicMock(), MagicMock())
+        detector = MagicMock()
+        detector.detect.return_value = {"file.py"}
+        service = DeletionTrackerService(git_repo, MagicMock(), MagicMock(), detector)
 
-        matched = service.process({"file.py"})
+        matched = service.process("rm file.py")
 
         assert matched == set()
 

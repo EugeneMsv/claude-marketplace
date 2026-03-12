@@ -10,36 +10,28 @@ push fails) — causing PostToolUse to be skipped entirely.
 Hook Event: PreToolUse Bash
 """
 
-import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from infrastructure.dependency_provider import DependencyProvider
-from infrastructure.hook_output_service import HookOutputService
-from infrastructure.hook_runner import run_hook
+from infrastructure.hook_runner import CommandHookRunner
 from services.bash_command_detector import DetectedCommand
 
 
-def _handle(provider: DependencyProvider, hook_output: HookOutputService) -> None:
-    input_data = json.load(sys.stdin)
-    tool_input = input_data.get('tool_input', {})
-    command = tool_input.get('command', '')
+class CommitPreHook(CommandHookRunner):
+    hook_name = 'COMMIT-PRE'
 
-    if not command:
-        hook_output.exit_with_success()
+    def _handle_git_commit(self, provider: DependencyProvider, _command: str):
+        provider.build_inject_service().record_commit_intent()
 
-    # Early exit: only act on non-amend git commits
-    if DetectedCommand.GIT_COMMIT not in provider.bash_command_detector().detect_commands(command):
-        hook_output.exit_with_success()
-
-    provider.build_inject_service().record_commit_intent()
+    command_handlers = {DetectedCommand.GIT_COMMIT: _handle_git_commit}
 
 
 def main():
     """Record commit intent before a git commit command runs."""
-    run_hook('COMMIT-PRE', _handle)
+    CommitPreHook().run()
 
 
 if __name__ == '__main__':

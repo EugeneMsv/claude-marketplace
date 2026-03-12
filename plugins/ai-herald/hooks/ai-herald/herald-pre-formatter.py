@@ -10,8 +10,6 @@ Hook Event: PreToolUse Bash
 Matcher: spotlessApply|prettier|ruff|eslint.*--fix|gofmt|rustfmt|clang-format
 """
 
-import json
-import os
 import sys
 from pathlib import Path
 
@@ -20,43 +18,32 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from infrastructure.dependency_provider import DependencyProvider
 from infrastructure.hook_output_service import HookOutputService
-from infrastructure.hook_runner import run_hook
+from infrastructure.hook_runner import CommandHookRunner
 from services.bash_command_detector import DetectedCommand
 
 
-def _handle(provider: DependencyProvider, hook_output: HookOutputService) -> None:
-    input_data = json.load(sys.stdin)
-    tool_input = input_data.get('tool_input', {})
-    command = tool_input.get('command', '')
+class FormatPreHook(CommandHookRunner):
+    hook_name = 'FORMAT-PRE'
 
-    # Early exit: no command
-    if not command:
-        hook_output.exit_with_success()
+    def _handle_code_formatter(self, provider: DependencyProvider, _command: str):
+        if not provider.config().format_detection_enabled:
+            return None
+        return provider.build_format_snapshot_service().capture_pre_format()
 
-    pid = os.getppid()  # Parent process ID (the bash command)
+    command_handlers = {DetectedCommand.CODE_FORMATTER: _handle_code_formatter}
 
-    # Early exit: tracker disabled or format detection disabled
-    config = provider.config()
-    if not config.format_detection_enabled:
-        hook_output.exit_with_success()
-
-    # Early exit: not a configured formatter command
-    detected = provider.bash_command_detector().detect_commands(command)
-    if DetectedCommand.CODE_FORMATTER not in detected:
-        hook_output.exit_with_success()
-
-    snapshot_service = provider.build_format_snapshot_service()
-    snapshot_path = snapshot_service.capture_pre_format(pid)
-
-    if snapshot_path:
-        if config.enable_logging:
-            provider.logger().info(f"Created format snapshot: {snapshot_path}")
-        hook_output.exit_with_success("⏳ Format snapshot captured")
+    def on_result(self, provider: DependencyProvider, hook_output: HookOutputService, result) -> None:
+        if result:
+            if provider.config().enable_logging:
+                provider.logger().info(f"Created format snapshot: {result}")
+            hook_output.exit_with_success("⏳ Format snapshot captured")
+        else:
+            hook_output.exit_with_success()
 
 
 def main():
     """Main entry point for format pre-hook."""
-    run_hook('FORMAT-PRE', _handle)
+    FormatPreHook().run()
 
 
 if __name__ == '__main__':

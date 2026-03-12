@@ -6,8 +6,8 @@ Records AI-authored line hashes to track AI vs human contributions.
 Part of the ai-contribution-tracker system.
 """
 
-import sys
 import json
+import sys
 from pathlib import Path
 
 # Add script directory to path for imports
@@ -16,41 +16,43 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 from infrastructure.dependency_provider import DependencyProvider
 from infrastructure.hook_output_service import HookOutputService
-from infrastructure.hook_runner import run_hook
+from infrastructure.hook_runner import HookRunner
 
 
-def _handle(provider: DependencyProvider, hook_output: HookOutputService) -> None:
-    hook_input = json.load(sys.stdin)
-    tool_name = hook_input.get('tool_name')
-    tool_input = hook_input.get('tool_input', {})
+class ChangeCaptorHook(HookRunner):
+    hook_name = 'CAPTURE'
 
-    # Early exit: only handle Write and Edit
-    if tool_name not in ['Write', 'Edit']:
-        hook_output.exit_with_success()
+    def _handle(self, provider: DependencyProvider, hook_output: HookOutputService) -> None:
+        hook_input = json.load(sys.stdin)
+        tool_name = hook_input.get('tool_name')
+        tool_input = hook_input.get('tool_input', {})
 
-    service = provider.build_capture_service()
+        if tool_name not in ['Write', 'Edit']:
+            hook_output.exit_with_success()
 
-    if tool_name == 'Write':
-        success = service.process_write(tool_input)
-    else:
-        success = service.process_edit(tool_input)
+        service = provider.build_capture_service()
 
-    if provider.config().enable_logging:
-        if success:
-            provider.logger().info("Successfully processed tool use")
+        if tool_name == 'Write':
+            success = service.process_write(tool_input)
         else:
-            provider.logger().info("Skipped (not applicable)")
+            success = service.process_edit(tool_input)
 
-    if success:
-        file_path = tool_input.get('file_path', '')
-        if file_path:
-            file_name = Path(file_path).name
-            hook_output.exit_with_success(f"✓ AI contribution tracked: {file_name}")
+        if provider.config().enable_logging:
+            if success:
+                provider.logger().info("Successfully processed tool use")
+            else:
+                provider.logger().info("Skipped (not applicable)")
+
+        if success:
+            file_path = tool_input.get('file_path', '')
+            if file_path:
+                file_name = Path(file_path).name
+                hook_output.exit_with_success(f"✓ AI contribution tracked: {file_name}")
 
 
 def main():
     """Main hook execution."""
-    run_hook('CAPTURE', _handle)
+    ChangeCaptorHook().run()
 
 
 if __name__ == '__main__':

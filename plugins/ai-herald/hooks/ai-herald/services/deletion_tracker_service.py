@@ -26,6 +26,7 @@ class DeletionTrackerService:
         git_repo: GitRepository,
         config: Configuration,
         logger: Logger,
+        deletion_targets_detector,
     ):
         """Initialize deletion tracker service.
 
@@ -33,20 +34,26 @@ class DeletionTrackerService:
             git_repo: GitRepository for git operations and path resolution
             config: Configuration settings
             logger: Logger instance with hook context
+            deletion_targets_detector: DeletionTargetsDetector for extracting path targets
         """
         self._git_repo = git_repo
         self._config = config
         self._logger = logger
+        self._detector = deletion_targets_detector
 
-    def process(self, targets: Set[str]) -> Set[str]:
-        """Mark AI-deleted files in tracking from pre-extracted deletion targets.
+    def process(self, command: str) -> Set[str]:
+        """Mark AI-deleted files in tracking from a bash command string.
+
+        Extracts deletion targets from the command internally, then cross-references
+        against git-deleted files and marks matched paths as AI-deleted.
 
         Args:
-            targets: Raw path tokens extracted from the bash command
+            command: Bash command string that may contain rm/git rm/unlink operations
 
         Returns:
             Set of git-relative file paths that were marked as AI-deleted
         """
+        targets = self._detector.detect(command)
         self._logger.info(f"Processing {len(targets)} deletion target(s)")
         if not targets:
             return set()
