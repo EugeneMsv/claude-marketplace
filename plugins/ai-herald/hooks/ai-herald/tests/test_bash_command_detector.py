@@ -1,4 +1,4 @@
-"""Tests for BashCommandDetector.detect_commands."""
+"""Tests for BashCommandDetector.detect_commands and detect_commands_ordered."""
 
 import sys
 from pathlib import Path
@@ -145,3 +145,105 @@ class TestCodeFormatterDetection:
         for cmd in ["spotlessApply", "prettier src/", "ruff format .", "git push"]:
             result = detector.detect_commands(cmd)
             assert DetectedCommand.CODE_FORMATTER not in result, f"Unexpected CODE_FORMATTER for: {cmd!r}"
+
+
+class TestGitMergeRebaseDetection:
+
+    @pytest.mark.parametrize("command, expected_in, expected_not_in", [
+        # GIT_MERGE positives
+        ("git merge main",                  {DetectedCommand.GIT_MERGE},  set()),
+        ("git merge origin/main",           {DetectedCommand.GIT_MERGE},  set()),
+        ("git --no-pager merge main",       {DetectedCommand.GIT_MERGE},  set()),
+        ("git merge --no-ff main",          {DetectedCommand.GIT_MERGE},  set()),
+        # GIT_REBASE positives
+        ("git rebase main",                 {DetectedCommand.GIT_REBASE}, set()),
+        ("git rebase origin/main",          {DetectedCommand.GIT_REBASE}, set()),
+        ("git --no-pager rebase main",      {DetectedCommand.GIT_REBASE}, set()),
+        ("git rebase --onto main",          {DetectedCommand.GIT_REBASE}, set()),
+        # negatives — should NOT be detected as merge/rebase
+        ("git commit -m 'msg'",             set(), {DetectedCommand.GIT_MERGE, DetectedCommand.GIT_REBASE}),
+        ("git push origin main",            set(), {DetectedCommand.GIT_MERGE, DetectedCommand.GIT_REBASE}),
+        ("git status",                      set(), {DetectedCommand.GIT_MERGE, DetectedCommand.GIT_REBASE}),
+    ])
+    def test_detect_merge_rebase(self, command, expected_in, expected_not_in):
+        """Given a bash command, detect_commands identifies GIT_MERGE/GIT_REBASE correctly."""
+        detector = _make_detector()
+        result = detector.detect_commands(command)
+        for cmd in expected_in:
+            assert cmd in result, f"Expected {cmd} in result for: {command!r}"
+        for cmd in expected_not_in:
+            assert cmd not in result, f"Unexpected {cmd} in result for: {command!r}"
+
+
+class TestDetectCommandsOrdered:
+
+    @pytest.mark.parametrize("command, expected_order", [
+        # merge before commit
+        ("git merge origin/main && git commit -m 'x'",
+         [DetectedCommand.GIT_MERGE, DetectedCommand.GIT_COMMIT]),
+        # commit before merge — reversed position, reversed result
+        ("git commit -m 'x' && git merge main",
+         [DetectedCommand.GIT_COMMIT, DetectedCommand.GIT_MERGE]),
+        # commit before push
+        ("git commit -m 'x' && git push",
+         [DetectedCommand.GIT_COMMIT, DetectedCommand.GIT_PUSH]),
+        # push before merge
+        ("git push && git merge main",
+         [DetectedCommand.GIT_PUSH, DetectedCommand.GIT_MERGE]),
+        # merge before push
+        ("git merge main && git push",
+         [DetectedCommand.GIT_MERGE, DetectedCommand.GIT_PUSH]),
+        # rebase before commit
+        ("git rebase origin/main && git commit -m 'fixup'",
+         [DetectedCommand.GIT_REBASE, DetectedCommand.GIT_COMMIT]),
+        # three-way chain: commit → merge → push
+        ("git commit -m 'x' && git merge origin/main && git push",
+         [DetectedCommand.GIT_COMMIT, DetectedCommand.GIT_MERGE, DetectedCommand.GIT_PUSH]),
+        # three-way chain: merge → commit → push
+        ("git merge origin/main && git commit -m 'x' && git push",
+         [DetectedCommand.GIT_MERGE, DetectedCommand.GIT_COMMIT, DetectedCommand.GIT_PUSH]),
+        # rebase only
+        ("git rebase origin/main",
+         [DetectedCommand.GIT_REBASE]),
+        # merge only
+        ("git merge main",
+         [DetectedCommand.GIT_MERGE]),
+        # commit only
+        ("git commit -m 'msg'",
+         [DetectedCommand.GIT_COMMIT]),
+        # amend + push
+        ("git commit --amend --no-edit && git push",
+         [DetectedCommand.GIT_COMMIT_AMEND, DetectedCommand.GIT_PUSH]),
+        # empty → empty list
+        ("", []),
+        (None, []),
+        # unrelated command → empty list
+        ("git status", []),
+    ])
+    def test_detect_commands_ordered(self, command, expected_order):
+        """detect_commands_ordered returns commands sorted by token position."""
+        detector = _make_detector()
+        result = detector.detect_commands_ordered(command)
+        assert result == expected_order, (
+            f"Command: {command!r}\n  got:      {result}\n  expected: {expected_order}"
+        )
+
+    @pytest.mark.parametrize("cmd_a, cmd_b, first, second", [
+        # Swapping the two subcommands swaps the result order
+        ("git merge origin/main && git commit -m 'x'",
+         "git commit -m 'x' && git merge origin/main",
+         DetectedCommand.GIT_MERGE, DetectedCommand.GIT_COMMIT),
+        ("git push && git merge main",
+         "git merge main && git push",
+         DetectedCommand.GIT_PUSH, DetectedCommand.GIT_MERGE),
+        ("git rebase main && git push",
+         "git push && git rebase main",
+         DetectedCommand.GIT_REBASE, DetectedCommand.GIT_PUSH),
+    ])
+    def test_order_reflects_token_position(self, cmd_a, cmd_b, first, second):
+        """Reversing subcommand positions in the string reverses the ordered result."""
+        detector = _make_detector()
+        result_a = detector.detect_commands_ordered(cmd_a)
+        result_b = detector.detect_commands_ordered(cmd_b)
+        assert result_a == [first, second],  f"cmd_a: got {result_a}, expected [{first}, {second}]"
+        assert result_b == [second, first],  f"cmd_b: got {result_b}, expected [{second}, {first}]"

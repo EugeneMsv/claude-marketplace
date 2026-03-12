@@ -2,7 +2,10 @@
 """
 AI Contribution Tracker - Inject Hook (PostToolUse Bash)
 
-Runs after git commit and amends the commit message with AI contribution stats.
+Runs after git commit/push/merge/rebase and handles each in positional order:
+  - GIT_COMMIT  → amend commit message with AI stats
+  - GIT_PUSH    → recovery path for missed commits
+  - GIT_MERGE / GIT_REBASE → refresh merge_base in tracking file
 Part of the ai-contribution-tracker system.
 """
 
@@ -18,6 +21,7 @@ from infrastructure.dependency_provider import DependencyProvider
 from infrastructure.hook_output_service import HookOutputService
 from infrastructure.hook_runner import run_hook
 from services.bash_command_detector import DetectedCommand
+from services.inject_service import InjectResult
 
 
 def _handle(provider: DependencyProvider, hook_output: HookOutputService) -> None:
@@ -25,26 +29,41 @@ def _handle(provider: DependencyProvider, hook_output: HookOutputService) -> Non
     tool_input = hook_input.get('tool_input', {})
     command = tool_input.get('command', '')
 
-    # Early exit: only handle git commit and git push (recovery path)
-    detected = provider.bash_command_detector().detect_commands(command)
-    if DetectedCommand.GIT_COMMIT not in detected and DetectedCommand.GIT_PUSH not in detected:
+    ordered = provider.bash_command_detector().detect_commands_ordered(command)
+
+    # Early exit: nothing we care about
+    actionable = {DetectedCommand.GIT_COMMIT, DetectedCommand.GIT_PUSH,
+                  DetectedCommand.GIT_MERGE, DetectedCommand.GIT_REBASE}
+    if not any(cmd in actionable for cmd in ordered):
         hook_output.exit_with_success()
 
-    service = provider.build_inject_service()
+    inject_service = provider.build_inject_service()
+    inject_result: InjectResult = InjectResult(False)
 
-    if DetectedCommand.GIT_COMMIT in detected:
-        provider.logger().info("Git commit command detected")
-        result = service.process_commit()
-    else:
-        # Recovery path: push after failed chained commit
-        result = service.recover_missed_commit()
+    for cmd in ordered:
+        if cmd == DetectedCommand.GIT_COMMIT:
+            provider.logger().info("Git commit command detected")
+            inject_result = inject_service.process_commit()
+
+        elif cmd == DetectedCommand.GIT_PUSH:
+            # Recovery path: push after failed chained commit
+            recovery = inject_service.recover_missed_commit()
+            if recovery.success:
+                inject_result = recovery
+
+        elif cmd in (DetectedCommand.GIT_MERGE, DetectedCommand.GIT_REBASE):
+            provider.logger().info(f"{cmd.value} detected — refreshing merge_base")
+            try:
+                provider.build_branch_sync_service().handle()
+            except Exception as e:
+                provider.logger().warning(f"BranchSync failed: {e}")
 
     # Append to history if inject succeeded and history is enabled
-    if result.success and result.stats is not None and result.tracking is not None:
+    if inject_result.success and inject_result.stats is not None and inject_result.tracking is not None:
         if provider.config().history_enabled:
             try:
                 history_service = provider.build_history_append_service()
-                history_service.append_commit(result.stats, result.tracking)
+                history_service.append_commit(inject_result.stats, inject_result.tracking)
             except Exception as e:
                 provider.logger().warning(f"History append failed: {e}")
 
@@ -62,15 +81,15 @@ def _handle(provider: DependencyProvider, hook_output: HookOutputService) -> Non
             provider.logger().warning(f"Housekeeping failed: {e}")
 
     if provider.config().enable_logging:
-        if result.success:
+        if inject_result.success:
             provider.logger().info("Commit amended successfully")
         else:
             provider.logger().info("Skipped (not applicable)")
 
-    if result.message:
-        hook_output.exit_with_success(result.message)
-    elif result.success and result.ai_percentage is not None:
-        hook_output.exit_with_success(f"✓ Commit amended: {result.ai_percentage}% AI")
+    if inject_result.message:
+        hook_output.exit_with_success(inject_result.message)
+    elif inject_result.success and inject_result.ai_percentage is not None:
+        hook_output.exit_with_success(f"✓ Commit amended: {inject_result.ai_percentage}% AI")
 
 
 def main():

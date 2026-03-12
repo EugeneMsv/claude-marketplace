@@ -175,3 +175,8 @@ class DependencyProvider:
         from services.query.history_query_service import HistoryQueryService
         history_repo = HistoryRepository(self.git_repo())
         return HistoryQueryService(history_repo, self.config())
+
+    def build_branch_sync_service(self) -> 'BranchSyncService':
+        """Build and return a fully-wired BranchSyncService."""
+        from services.branch_sync_service import BranchSyncService
+        return BranchSyncService(self.git_repo(), self.config(), self.logger())
