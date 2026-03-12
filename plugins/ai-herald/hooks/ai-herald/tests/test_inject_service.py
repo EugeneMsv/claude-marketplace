@@ -81,6 +81,7 @@ def git_repo():
     repo.get_diff.return_value = Diff("merge-base-hash", {})
     repo.get_head_commit_hash.return_value = "newhead123"
     repo.get_head_commit_message.return_value = "Fix bug"
+    repo.sanitize_branch_name.side_effect = lambda branch: branch.replace('/', '-').replace('\\', '-')
     return repo
 
 

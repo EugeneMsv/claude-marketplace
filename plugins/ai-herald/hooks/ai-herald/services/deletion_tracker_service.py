@@ -76,7 +76,7 @@ class DeletionTrackerService:
             self._logger.info("No deletion targets matched git-deleted files, skipping")
             return set()
 
-        sanitized_branch = GitRepository.sanitize_branch_name(branch)
+        sanitized_branch = self._git_repo.sanitize_branch_name(branch)
         tracking_repo = TrackingRepository(git_root, sanitized_branch)
         tracking = tracking_repo.load()
         if not tracking:

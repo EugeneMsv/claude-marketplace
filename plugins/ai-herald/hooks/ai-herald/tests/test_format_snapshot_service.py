@@ -36,7 +36,7 @@ def _make_service(git_root: Path, branch: str = "feature/test", logger=None):
     git_repo = MagicMock()
     git_repo.get_root.return_value = git_root
     git_repo.get_current_branch.return_value = branch
-    git_repo.sanitize_branch_name = GitRepository.sanitize_branch_name
+    git_repo.sanitize_branch_name = lambda branch: branch.replace('/', '-').replace('\\', '-')
 
     config = MagicMock()
     hasher = LineHasher()
@@ -61,7 +61,7 @@ class TestCapturePreFormat:
         (temp_dir / ".claude").mkdir()
         service = _make_service(temp_dir)
 
-        sanitized = GitRepository.sanitize_branch_name("feature/test")
+        sanitized = "feature/test".replace('/', '-').replace('\\', '-')
         tracking_repo = TrackingRepository(temp_dir, sanitized)
         tracking = TrackingData("feature/test")
         tracking_repo.save(tracking)
@@ -81,7 +81,7 @@ class TestCapturePreFormat:
 
         # Create tracking data referencing the file
         hasher = LineHasher()
-        sanitized = GitRepository.sanitize_branch_name("feature/test")
+        sanitized = "feature/test".replace('/', '-').replace('\\', '-')
         tracking_repo = TrackingRepository(temp_dir, sanitized)
         tracking = TrackingData("feature/test")
         tracking.track_file("app.py")

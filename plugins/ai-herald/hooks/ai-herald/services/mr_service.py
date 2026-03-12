@@ -109,7 +109,7 @@ class MrService:
             self._logger.warning("Could not get git root directory")
             return MrResult(False)
 
-        sanitized_branch = GitRepository.sanitize_branch_name(branch)
+        sanitized_branch = self._git_repo.sanitize_branch_name(branch)
         tracking_repo = TrackingRepository(git_root, sanitized_branch)
 
         tracking = tracking_repo.load()
@@ -166,7 +166,7 @@ class MrService:
         create_label = None
         git_root = self._git_repo.get_root()
         if git_root:
-            sanitized_branch = GitRepository.sanitize_branch_name(branch)
+            sanitized_branch = self._git_repo.sanitize_branch_name(branch)
             tracking_repo = TrackingRepository(git_root, sanitized_branch)
             tracking = tracking_repo.load()
 

@@ -151,7 +151,7 @@ class HousekeepingService:
                 branch = sanitized_branch.replace('-', '/')
 
                 # Exclude current branch
-                if branch == current_branch or sanitized_branch == GitRepository.sanitize_branch_name(current_branch):
+                if branch == current_branch or sanitized_branch == self._git_repo.sanitize_branch_name(current_branch):
                     self._logger.debug(f"Excluding current branch: {file_path.name}")
                     continue
 

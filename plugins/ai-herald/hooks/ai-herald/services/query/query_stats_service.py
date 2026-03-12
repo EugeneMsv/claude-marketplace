@@ -59,7 +59,7 @@ class QueryStatsService:
             self._logger.debug("Could not get git root")
             return None
 
-        sanitized_branch = GitRepository.sanitize_branch_name(branch)
+        sanitized_branch = self._git_repo.sanitize_branch_name(branch)
         tracking_repo = TrackingRepository(git_root, sanitized_branch)
         tracking = tracking_repo.load()
         if not tracking:

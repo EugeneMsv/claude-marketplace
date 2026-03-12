@@ -145,7 +145,7 @@ class CaptureService:
             self._logger.warning("Could not get current branch")
             return False
 
-        sanitized_branch = GitRepository.sanitize_branch_name(branch)
+        sanitized_branch = self._git_repo.sanitize_branch_name(branch)
         tracking_repo = TrackingRepository(git_root, sanitized_branch)
 
         self._logger.info(f"Tracking file: {tracking_repo.tracking_path}")

@@ -20,6 +20,7 @@ def _make_service(git_root, branch, git_deleted_files):
     git_repo = MagicMock()
     git_repo.get_root.return_value = git_root
     git_repo.get_current_branch.return_value = branch
+    git_repo.sanitize_branch_name = lambda branch: branch.replace('/', '-').replace('\\', '-')
 
     logger = MagicMock()
 

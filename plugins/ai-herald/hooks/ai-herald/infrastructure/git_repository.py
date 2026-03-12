@@ -301,8 +301,7 @@ class GitRepository:
         except (subprocess.CalledProcessError, FileNotFoundError):
             return 0
 
-    @staticmethod
-    def sanitize_branch_name(branch: str) -> str:
+    def sanitize_branch_name(self, branch: str) -> str:
         """Sanitize branch name for use in filenames.
 
         Args:

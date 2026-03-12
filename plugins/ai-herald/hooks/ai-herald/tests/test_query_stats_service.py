@@ -79,6 +79,7 @@ def git_repo():
     repo.get_root.return_value = None  # overridden per test
     repo.get_merge_base.return_value = "merge-base-hash"
     repo.get_diff.return_value = Diff("merge-base-hash", {})
+    repo.sanitize_branch_name.side_effect = lambda branch: branch.replace('/', '-').replace('\\', '-')
     return repo
 
 
@@ -205,6 +206,7 @@ class TestCalculateCurrentStatsSuccess:
         git_repo.get_root.return_value = git_root
         git_repo.get_merge_base.return_value = "merge-base"
         git_repo.get_diff.return_value = Diff("merge-base", {})
+        git_repo.sanitize_branch_name.side_effect = lambda branch: branch.replace('/', '-').replace('\\', '-')
 
         tracking = TrackingData(branch)
         tracking.files_tracked = ["file.py"]
