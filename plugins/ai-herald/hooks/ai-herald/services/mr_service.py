@@ -140,11 +140,10 @@ class MrService:
             self._logger.info("=== MR updated ===")
         ai_percentage = int(round(stats.ai_percentage)) if success else None
         result = MrResult(success, ai_percentage)
-        if self._config.enable_logging:
-            if result.success:
-                self._logger.info("MR updated successfully")
-            else:
-                self._logger.info("Skipped (not applicable)")
+        if result.success:
+            self._logger.info("MR updated successfully")
+        else:
+            self._logger.info("Skipped (not applicable)")
         return result
 
     def _auto_create_mr(self, branch: str) -> MrResult:

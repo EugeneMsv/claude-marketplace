@@ -34,8 +34,7 @@ class FormatPreHook(CommandHookRunner):
 
     def on_result(self, provider: DependencyProvider, hook_output: HookOutputService, result) -> None:
         if result:
-            if provider.config().enable_logging:
-                provider.logger().info(f"Created format snapshot: {result}")
+            provider.logger().info(f"Created format snapshot: {result}")
             hook_output.exit_with_success("⏳ Format snapshot captured")
         else:
             hook_output.exit_with_success()

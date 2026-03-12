@@ -38,8 +38,7 @@ class HookRunner:
             self._handle(provider, hook_output)
         except Exception as e:
             try:
-                if provider.config().enable_logging:
-                    provider.logger().error(f"Hook failed: {e}", exc_info=True)
+                provider.logger().error(f"Hook failed: {e}", exc_info=True)
             except Exception:
                 pass  # logger itself failed — cannot do more
 

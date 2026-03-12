@@ -167,11 +167,10 @@ class CaptureService:
         else:
             self._logger.warning("Failed to save tracking file")
 
-        if self._config.enable_logging:
-            if success:
-                self._logger.info("Successfully processed tool use")
-            else:
-                self._logger.info("Skipped (not applicable)")
+        if success:
+            self._logger.info("Successfully processed tool use")
+        else:
+            self._logger.info("Skipped (not applicable)")
 
         return success
 

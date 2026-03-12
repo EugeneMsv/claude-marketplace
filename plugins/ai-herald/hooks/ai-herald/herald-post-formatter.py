@@ -31,8 +31,7 @@ class FormatPostHook(HookRunner):
         success = provider.build_format_tracker_service().process_post_format()
 
         if success:
-            if provider.config().enable_logging:
-                provider.logger().info("Successfully updated attribution after formatting")
+            provider.logger().info("Successfully updated attribution after formatting")
             hook_output.exit_with_success("✓ Format attribution applied")
 
 
