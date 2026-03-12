@@ -26,8 +26,6 @@ class FormatPreHook(CommandHookRunner):
     hook_name = 'FORMAT-PRE'
 
     def _handle_code_formatter(self, provider: DependencyProvider, _command: str):
-        if not provider.config().format_detection_enabled:
-            return None
         return provider.build_format_snapshot_service().capture_pre_format()
 
     command_handlers = {DetectedCommand.CODE_FORMATTER: _handle_code_formatter}

@@ -18,9 +18,6 @@ class FormatSnapshotService:
     This service runs in the PreToolUse hook before formatters execute.
     It creates a temporary snapshot of AI-attributed line content that
     can be compared with post-format state.
-
-    Caller is responsible for routing: only invoke when format_detection_enabled
-    and a CODE_FORMATTER command was detected.
     """
 
     def __init__(
@@ -50,6 +47,9 @@ class FormatSnapshotService:
         Returns:
             Path to snapshot file if successful, None otherwise
         """
+        if not self._config.format_detection_enabled:
+            return None
+
         self._logger.info("Detected format command")
 
         branch = self._git_repo.get_current_branch()

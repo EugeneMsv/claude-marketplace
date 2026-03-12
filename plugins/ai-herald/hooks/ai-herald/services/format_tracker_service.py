@@ -53,6 +53,9 @@ class FormatTrackerService:
         Returns:
             True if processing succeeded
         """
+        if not self._config.format_detection_enabled:
+            return False
+
         pid = os.getppid()
 
         # Get git root

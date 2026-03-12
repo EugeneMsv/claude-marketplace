@@ -77,6 +77,26 @@ def format_tracker(git_repo, config, hasher, token_normalizer, logger):
     return FormatTrackerService(git_repo, config, hasher, token_normalizer, logger)
 
 
+class TestProcessPostFormat:
+    """Tests for process_post_format() method."""
+
+    def test_returns_false_when_format_detection_disabled(self, git_repo, hasher, token_normalizer, logger):
+        """Given format_detection_enabled=False, returns False without git access."""
+        config = Configuration(
+            enabled=True,
+            base_branches=['main'],
+            tracked_extensions={'.py'},
+            enable_logging=False,
+            log_file='test.log',
+            format_detection_enabled=False
+        )
+        service = FormatTrackerService(git_repo, config, hasher, token_normalizer, logger)
+
+        result = service.process_post_format()
+
+        assert result is False
+
+
 class TestProcessFile:
     """Tests for _process_file method."""
 

@@ -115,3 +115,15 @@ class TestCapturePreFormat:
         result = service.capture_pre_format()
 
         assert result is None
+
+    def test_returns_none_when_format_detection_disabled(self, temp_dir):
+        """Given format_detection_enabled=False, returns None without touching git."""
+        git_repo = MagicMock()
+        config = MagicMock()
+        config.format_detection_enabled = False
+        service = FormatSnapshotService(git_repo, config, LineHasher(), logging.getLogger("test"))
+
+        result = service.capture_pre_format()
+
+        assert result is None
+        git_repo.get_current_branch.assert_not_called()
