@@ -194,8 +194,8 @@ class TestRecoverMissedCommitSuccess:
         loaded = repo.load()
         assert loaded.pending_inject_head is None
 
-    def test_clears_flag_even_when_amend_fails(self, service, git_repo, git_root):
-        """Given amend subprocess fails, flag is still cleared (stats were saved before amend)."""
+    def test_preserves_flag_when_amend_fails(self, service, git_repo, git_root):
+        """Given amend subprocess fails, pending_inject_head is preserved so recovery can retry."""
         git_repo.get_root.return_value = git_root
         git_repo.get_head_commit_hash.return_value = "newhead"
         git_repo.get_head_commit_message.return_value = "Fix bug"
@@ -211,7 +211,7 @@ class TestRecoverMissedCommitSuccess:
 
         assert not result.success
         loaded = repo.load()
-        assert loaded.pending_inject_head is None
+        assert loaded.pending_inject_head == "oldhead"
 
 
 class TestRecordCommitIntent:

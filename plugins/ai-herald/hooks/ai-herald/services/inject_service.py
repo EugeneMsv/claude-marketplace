@@ -129,7 +129,14 @@ class InjectService:
 
         pending = tracking.pending_inject_head
         if not pending:
-            # No commit intent was recorded — nothing to recover
+            if tracking.files_tracked:
+                commit_message = self._git_repo.get_head_commit_message()
+                if commit_message and "Overall: +" in commit_message:
+                    self._logger.info("No pending intent — HEAD already has stats, skipping")
+                    return InjectResult(False)
+                self._logger.info("No pending intent recorded — attempting unconditional recovery")
+                return self._do_inject(tracking, tracking_repo)
+            self._logger.info("No pending intent and no tracked files, skipping recovery")
             return InjectResult(False)
 
         current_head = self._git_repo.get_head_commit_hash()
@@ -185,7 +192,8 @@ class InjectService:
         """Calculate stats and amend the current HEAD commit message.
 
         Shared by both process_commit and recover_missed_commit. Clears
-        pending_inject_head on completion (success or failure after stats save).
+        pending_inject_head only on successful amend; preserves it on failure
+        so recover_missed_commit can retry on the next hook invocation.
 
         Args:
             tracking: Loaded TrackingData to use and update
@@ -208,10 +216,9 @@ class InjectService:
         if ignored.total > 0:
             self._logger.info(f"Ignored matched patterns: {sorted(ignored.matched_patterns)}")
 
-        # Update tracking data with stats and clear commit intent flag
+        # Save stats; keep pending_inject_head until amend succeeds so recovery can retry
         tracking.stats = stats.to_dict()
         tracking.last_updated = datetime.now().isoformat()
-        tracking.pending_inject_head = None
         tracking_repo.save(tracking)
 
         self._logger.info("Tracking file updated with stats")
@@ -228,6 +235,9 @@ class InjectService:
         self._logger.info("New message with stats appended")
 
         if self._git_repo.amend_commit_message(new_message):
+            # Clear the intent only after a successful amend
+            tracking.pending_inject_head = None
+            tracking_repo.save(tracking)
             self._logger.info("=== Commit amended successfully ===")
             ai_percentage = int(round(stats.ai_percentage))
             return InjectResult(True, ai_percentage, stats=stats, tracking=tracking)
