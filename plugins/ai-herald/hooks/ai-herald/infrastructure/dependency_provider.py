@@ -66,7 +66,7 @@ class DependencyProvider:
     def git_repo(self) -> GitRepository:
         """Return cached GitRepository instance."""
         if self._git_repo is None:
-            self._git_repo = GitRepository()
+            self._git_repo = GitRepository(self.logger())
         return self._git_repo
 
     def glab_repo(self) -> GlabRepository:
