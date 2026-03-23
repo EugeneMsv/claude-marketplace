@@ -125,8 +125,8 @@ class TestRecoverMissedCommitSkipConditions:
 
         assert not result.success
 
-    def test_skips_when_no_pending_inject_head(self, service, git_repo, git_root):
-        """Given tracking exists but no pending_inject_head, returns False."""
+    def test_skips_when_no_pending_inject_head_and_no_tracked_files(self, service, git_repo, git_root):
+        """Given no pending intent and no tracked files, returns False."""
         git_repo.get_root.return_value = git_root
         tracking = TrackingData("feature-branch")
         tracking.pending_inject_head = None
@@ -135,6 +135,38 @@ class TestRecoverMissedCommitSkipConditions:
         result = service.recover_missed_commit()
 
         assert not result.success
+
+    def test_skips_when_no_pending_intent_but_head_already_has_stats(self, service, git_repo, git_root):
+        """Given no pending intent, files tracked, but HEAD already has stats — skips."""
+        git_repo.get_root.return_value = git_root
+        git_repo.get_head_commit_message.return_value = "Fix bug\n\nOverall: +50 -10\n  AI: 80%"
+
+        tracking = TrackingData("feature-branch")
+        tracking.pending_inject_head = None
+        tracking.files_tracked = ["file.py"]
+        TrackingRepository(git_root, "feature-branch").save(tracking)
+
+        result = service.recover_missed_commit()
+
+        assert not result.success
+
+    def test_injects_unconditionally_when_no_pending_intent_but_files_tracked(
+        self, service, git_repo, git_root
+    ):
+        """Given no pending intent but files tracked and HEAD has no stats, injects."""
+        git_repo.get_root.return_value = git_root
+        git_repo.get_head_commit_message.return_value = "Fix bug"
+        git_repo.amend_commit_message.return_value = True
+
+        tracking = TrackingData("feature-branch")
+        tracking.pending_inject_head = None
+        tracking.files_tracked = ["file.py"]
+        TrackingRepository(git_root, "feature-branch").save(tracking)
+
+        result = service.recover_missed_commit()
+
+        assert result.success
+        assert result.ai_percentage == 80
 
     def test_skips_when_head_unchanged(self, service, git_repo, git_root):
         """Given pending_inject_head equals current HEAD, commit never happened — clears flag."""
@@ -286,6 +318,25 @@ class TestProcessCommitClearsPendingFlag:
         assert result.success
         loaded = repo.load()
         assert loaded.pending_inject_head is None
+
+    def test_preserves_flag_on_failed_normal_inject(self, service, git_repo, git_root):
+        """Given normal commit path with amend failure, pending_inject_head preserved for retry."""
+        git_repo.get_root.return_value = git_root
+        git_repo.get_head_commit_message.return_value = "Fix bug"
+
+        tracking = TrackingData("feature-branch")
+        tracking.pending_inject_head = "some-old-head"
+        tracking.files_tracked = ["file.py"]
+        repo = TrackingRepository(git_root, "feature-branch")
+        repo.save(tracking)
+
+        git_repo.amend_commit_message.return_value = False
+
+        result = service.process_commit()
+
+        assert not result.success
+        loaded = repo.load()
+        assert loaded.pending_inject_head == "some-old-head"
 
 
 class TestInjectResultStatsAndTracking:
