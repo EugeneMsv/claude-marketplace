@@ -58,6 +58,15 @@ class TestDetectCommands:
         ("git -C /repo add . && git -C /repo commit -m 'msg'", {DetectedCommand.GIT_COMMIT}),
         ("git -C /repo add . && git -C /repo commit -m 'msg' && git -C /repo push",
                                                                {DetectedCommand.GIT_COMMIT, DetectedCommand.GIT_PUSH}),
+        # Heredoc / multiline commit messages ($(cat <<'EOF'\n...\nEOF\n) pattern)
+        ("git add file.py && git commit -m \"$(cat <<'EOF'\nfix: message\nEOF\n)\"",
+                                                               {DetectedCommand.GIT_COMMIT}),
+        ("cd /repo && git add file.py && git commit -m \"$(cat <<'EOF'\nfix: message\nEOF\n)\"",
+                                                               {DetectedCommand.GIT_COMMIT}),
+        ("git add a.py b.py && git commit -m \"$(cat <<'EOF'\nfeat: title\n\nbody line 1\nbody line 2\nEOF\n)\"",
+                                                               {DetectedCommand.GIT_COMMIT}),
+        ("git add . && git commit -m \"$(cat <<'EOF'\nfix: msg\nEOF\n)\" && git push",
+                                                               {DetectedCommand.GIT_COMMIT, DetectedCommand.GIT_PUSH}),
         # Unidentified
         ("git status",                                  {DetectedCommand.UNIDENTIFIED}),
         ("git add .",                                   {DetectedCommand.UNIDENTIFIED}),

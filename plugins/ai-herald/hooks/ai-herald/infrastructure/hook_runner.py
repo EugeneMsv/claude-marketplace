@@ -60,6 +60,7 @@ class CommandHookRunner(HookRunner):
 
     def _handle(self, provider: DependencyProvider, hook_output: HookOutputService) -> None:
         command = json.load(sys.stdin).get('tool_input', {}).get('command', '')
+        provider.logger().debug(f"Hook invoked, command[:80]: {command[:80]!r}")
         detector = provider.bash_command_detector()
 
         # Ordered git subcommands (commit, push, merge, rebase by position in command)

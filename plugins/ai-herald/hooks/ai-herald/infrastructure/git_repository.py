@@ -1,6 +1,7 @@
 """Git repository infrastructure."""
 
 import subprocess
+from logging import Logger
 from pathlib import Path
 from typing import Optional, List
 from domain.diff import Diff
@@ -12,10 +13,15 @@ class GitRepository:
     Handles all git subprocess operations with caching for expensive calls.
     """
 
-    def __init__(self):
-        """Initialize git repository."""
+    def __init__(self, logger: Optional[Logger] = None):
+        """Initialize git repository.
+
+        Args:
+            logger: Optional logger for diagnostics (e.g. amend failure stderr)
+        """
         self._root: Optional[Path] = None
         self._branch: Optional[str] = None
+        self._logger = logger
 
     def get_root(self) -> Optional[Path]:
         """Get git repository root directory (cached).
@@ -210,7 +216,11 @@ class GitRepository:
                 capture_output=True
             )
             return True
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
+            if self._logger and e.stderr:
+                stderr = e.stderr.decode(errors='replace') if isinstance(e.stderr, bytes) else e.stderr
+                if stderr.strip():
+                    self._logger.error(f"amend stderr: {stderr.strip()}")
             return False
 
     def get_remote_url(self) -> Optional[str]:
