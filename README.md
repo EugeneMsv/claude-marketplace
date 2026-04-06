@@ -11,8 +11,12 @@ marketplace/
 ├── README.md              # This file
 ├── CONTRIBUTING.md        # Submission guidelines
 ├── LICENSE                # MIT license
-└── plugins/               # Plugin directory
-    └── ai-herald/
+└── plugins/
+    ├── ai-herald/
+    ├── claude-code-guide/
+    ├── code-sentinel/
+    ├── feedback-loop/
+    └── plan-guard/
 ```
 
 ## Available Plugins
@@ -30,6 +34,52 @@ Watches every AI write, then announces attribution stats at commit time.
 - Automatic housekeeping for stale tracking files
 
 **[Full Documentation →](plugins/ai-herald/README.md)**
+
+---
+
+### claude-code-guide
+
+Enforces use of official Claude Code docs before answering any questions about Claude Code settings, features, or behavior.
+
+**Skills:** `claude-code-docs`
+
+**[Full Documentation →](plugins/claude-code-guide/README.md)**
+
+---
+
+### feedback-loop
+
+Monitors tool usage and failures, then helps refine permissions, rules, and memory files based on real usage data.
+
+**Skills:** `tool-permission-refiner`, `tool-rules-refiner`, `memory-refiner`
+
+**Hooks:** `tool-detector` (PreToolUse), `fail-detector` (PostToolUseFailure)
+
+**Data directory:** `~/.claude/feedback-loop/` — `tool-detector.jsonl`, `fails.jsonl`
+
+**[Full Documentation →](plugins/feedback-loop/README.md)**
+
+---
+
+### plan-guard
+
+Enforces plan mode discipline, syncs plan files to project directories, and cleans up old plan files.
+
+**Skills:** `cleanup-plans`
+
+**Hooks:** `plan-mode-enforcer` (UserPromptSubmit), `copy-plan-on-change` + `copy-plan-on-exit` (PostToolUse)
+
+**[Full Documentation →](plugins/plan-guard/README.md)**
+
+---
+
+### code-sentinel
+
+Expert code review with layer-by-layer flow diagrams, model diff trees, and interactive GitLab MR comment resolution.
+
+**Skills:** `code-review`, `mr-nitpick-sentinel`
+
+**[Full Documentation →](plugins/code-sentinel/README.md)**
 
 ## For Users
 
