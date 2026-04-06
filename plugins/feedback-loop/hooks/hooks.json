@@ -1,0 +1,29 @@
+{
+  "description": "Feedback Loop — logs tool usage and failures for permission and rule refinement",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/feedback-loop/tool-detector.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/feedback-loop/fail-detector.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

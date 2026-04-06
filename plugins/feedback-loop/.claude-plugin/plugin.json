@@ -1,0 +1,5 @@
+{
+  "name": "feedback-loop",
+  "version": "0.1.0",
+  "description": "Feedback Loop — monitors tool usage and failures, refines permissions, rules, and memory"
+}
