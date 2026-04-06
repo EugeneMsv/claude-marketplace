@@ -1,0 +1,5 @@
+{
+  "name": "claude-code-guide",
+  "version": "0.1.0",
+  "description": "Claude Code documentation guide — enforces use of official docs, CHANGELOG, and GitHub issues for all Claude Code questions"
+}

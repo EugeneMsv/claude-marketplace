@@ -3,7 +3,7 @@
   "version": "0.0.15",
   "name": "eug-msv-claude-marketplace",
   "description": "Plugin marketplace for Claude Code from Eugene Moiseev",
-  "updated": "2026-03-12",
+  "updated": "2026-04-06",
   "owner": {
     "name": "Eugene Moiseev",
     "url": "https://github.com/EugeneMsv"
@@ -20,6 +20,18 @@
       "category": "development",
       "homepage": "https://github.com/EugeneMsv/claude-marketplace/tree/main/plugins/ai-herald",
       "tags": ["metrics","monitoring","tracking","analytics"]
+    },
+    {
+      "name": "claude-code-guide",
+      "source": "./plugins/claude-code-guide",
+      "description": "Claude Code documentation guide — enforces use of official docs, CHANGELOG, and GitHub issues for all Claude Code questions",
+      "version": "0.1.0",
+      "author": {
+        "name": "Eugene Moiseev"
+      },
+      "category": "development",
+      "homepage": "https://github.com/EugeneMsv/claude-marketplace/tree/main/plugins/claude-code-guide",
+      "tags": ["documentation","guide","claude-code","reference"]
     }
   ]
 }
