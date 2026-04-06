@@ -48,8 +48,8 @@
     {
       "name": "plan-guard",
       "source": "./plugins/plan-guard",
-      "description": "Plan Guard — enforces plan mode discipline, syncs plans to projects, and cleans up old plan files",
-      "version": "0.1.0",
+      "description": "Plan Guard — enforces plan mode discipline, scores incoming prompt quality, syncs plans to projects, and cleans up old plan files",
+      "version": "0.2.1",
       "author": {
         "name": "Eugene Moiseev"
       },

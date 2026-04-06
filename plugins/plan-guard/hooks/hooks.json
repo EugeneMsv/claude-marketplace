@@ -6,8 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/plan-guard/plan-mode-enforcer.py",
-            "timeout": 15
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/plan-guard/prompt-quality-scorer.py",
+            "timeout": 20
           }
         ]
       },
@@ -15,8 +15,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/plan-guard/prompt-quality-scorer.py",
-            "timeout": 20
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/plan-guard/plan-mode-enforcer.py",
+            "timeout": 15
           }
         ]
       }
