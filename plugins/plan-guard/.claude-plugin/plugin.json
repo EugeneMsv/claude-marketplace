@@ -1,0 +1,5 @@
+{
+  "name": "plan-guard",
+  "version": "0.1.0",
+  "description": "Plan Guard — enforces plan mode discipline, syncs plans to projects, and cleans up old plan files"
+}

@@ -1,0 +1,38 @@
+{
+  "description": "Plan Guard — enforces plan mode constraints and syncs plan files to project directories",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/plan-guard/plan-mode-enforcer.py",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/plan-guard/copy-plan-on-change.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/plan-guard/copy-plan-on-exit.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
