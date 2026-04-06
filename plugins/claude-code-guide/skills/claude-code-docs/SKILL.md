@@ -6,6 +6,8 @@ description: >
   in Claude Code", "what is the setting for X", "does Claude Code support X", "why doesn't X
   work in Claude Code", or reports a Claude Code bug. MUST be triggered before answering any
   Claude Code docs or settings question. Do NOT trigger for general coding or non-Claude-Code topics.
+fork: true
+allowed-tools: Read, Glob, Grep, WebFetch, WebSearch
 ---
 
 # Claude Code Documentation Guide
