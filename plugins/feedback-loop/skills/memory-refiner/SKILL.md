@@ -1,5 +1,5 @@
 ---
-name: memory-refiner
+name: msv-memory-refiner
 description: This skill should be used when the user asks to "refine memory", "improve memory files", "update memory", "analyze learnings", "suggest memory improvements", "optimize memory", or requests analysis of conversation patterns to improve Claude Code's memory. Analyzes conversation history and existing memory files to suggest specific, actionable improvements.
 allowed-tools: Read, Grep, Glob
 disable-model-invocation: true

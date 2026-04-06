@@ -1,5 +1,5 @@
 ---
-name: mr-nitpick-sentinel
+name: msv-mr-nitpick-sentinel
 description: Analyzes and helps address merge request comments interactively. Use when the user asks to "address MR comments", "review MR feedback", "handle reviewer comments", "respond to code review", or "fix review issues".
 version: 0.1.0
 ---

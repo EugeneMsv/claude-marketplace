@@ -1,5 +1,5 @@
 ---
-name: code reviewer
+name: msv-code-review
 description: Makes a code review based on branch name
 ---
 

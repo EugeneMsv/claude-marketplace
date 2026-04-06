@@ -1,5 +1,5 @@
 ---
-name: tool-permission-refiner
+name: msv-tool-permission-refiner
 description: This skill should be used when the user asks to "audit tool permissions", "refine permissions from log", "check what tools need permissions", "analyze tool usage permissions", "permission audit", "run tool-permission-refiner", "what tools are unmatched", "tighten permissions", or wants to derive permission rules from ~/.claude/feedback-loop/tool-detector.jsonl into settings.json allow/ask/deny lists. Cross-references real tool usage data against all permission layers and applies security-first, principle-of-least-privilege suggestions.
 version: 1.0.0
 allowed-tools: Read, Grep, Glob, Edit

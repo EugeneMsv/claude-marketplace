@@ -1,5 +1,5 @@
 ---
-name: cleanup-plans
+name: msv-cleanup-plans
 version: 1.0.0
 description: |
   This skill should be used when the user asks to "cleanup old plans",

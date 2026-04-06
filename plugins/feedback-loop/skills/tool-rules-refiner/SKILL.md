@@ -1,5 +1,5 @@
 ---
-name: tool-rules-refiner
+name: msv-tool-rules-refiner
 description: This skill should be used when the user asks to "analyze tool failures", "learn from fail log", "improve tool rules", "update tools memory", "refine tool guidelines", "scan detection log", "extract tool learnings", or wants to derive rules from ~/.claude/feedback-loop/fails.jsonl into guides/Tools.md. Analyzes recurring failure patterns and proposes token-efficient one-liner rules grouped by tool and sub-command.
 allowed-tools: Read, Grep, Glob, Bash
 ---
