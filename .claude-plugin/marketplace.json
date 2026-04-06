@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "version": "0.0.15",
+  "version": "0.1.0",
   "name": "eug-msv-claude-marketplace",
   "description": "Plugin marketplace for Claude Code from Eugene Moiseev",
   "updated": "2026-04-06",
@@ -32,6 +32,42 @@
       "category": "development",
       "homepage": "https://github.com/EugeneMsv/claude-marketplace/tree/main/plugins/claude-code-guide",
       "tags": ["documentation","guide","claude-code","reference"]
+    },
+    {
+      "name": "feedback-loop",
+      "source": "./plugins/feedback-loop",
+      "description": "Feedback Loop — monitors tool usage and failures, refines permissions, rules, and memory",
+      "version": "0.1.0",
+      "author": {
+        "name": "Eugene Moiseev"
+      },
+      "category": "development",
+      "homepage": "https://github.com/EugeneMsv/claude-marketplace/tree/main/plugins/feedback-loop",
+      "tags": ["monitoring","permissions","rules","memory","refinement"]
+    },
+    {
+      "name": "plan-guard",
+      "source": "./plugins/plan-guard",
+      "description": "Plan Guard — enforces plan mode discipline, syncs plans to projects, and cleans up old plan files",
+      "version": "0.1.0",
+      "author": {
+        "name": "Eugene Moiseev"
+      },
+      "category": "development",
+      "homepage": "https://github.com/EugeneMsv/claude-marketplace/tree/main/plugins/plan-guard",
+      "tags": ["planning","enforcement","sync","cleanup"]
+    },
+    {
+      "name": "code-sentinel",
+      "source": "./plugins/code-sentinel",
+      "description": "Code Sentinel — expert code review with flow diagrams and interactive MR comment resolution",
+      "version": "0.1.0",
+      "author": {
+        "name": "Eugene Moiseev"
+      },
+      "category": "development",
+      "homepage": "https://github.com/EugeneMsv/claude-marketplace/tree/main/plugins/code-sentinel",
+      "tags": ["code-review","gitlab","mr","review","diff"]
     }
   ]
 }
