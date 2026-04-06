@@ -99,6 +99,10 @@ def call_anthropic(context: str) -> str:
 
 
 def main() -> None:
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print(json.dumps({"systemMessage": "[plan-enforcer] No API key detected, skipping"}))
+        return
+
     hook_input = json.load(sys.stdin)
     hook_event = hook_input.get("hook_event_name", "PreToolUse")
     cwd = hook_input.get("cwd", os.getcwd())

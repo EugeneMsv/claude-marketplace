@@ -10,6 +10,15 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/plan-guard/prompt-quality-scorer.py",
+            "timeout": 20
+          }
+        ]
       }
     ],
     "PostToolUse": [
