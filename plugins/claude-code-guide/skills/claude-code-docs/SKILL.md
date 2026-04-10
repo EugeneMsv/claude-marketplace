@@ -22,24 +22,31 @@ priority order:
 
 ### 1. Official Docs (primary source)
 
-Fetch the most relevant docs page first:
+You MUST always fetch the docs index first before anything else:
 
 ```
-https://code.claude.com/docs/en/
+https://code.claude.com/docs/llms.txt
 ```
 
-Key sections:
-- `/settings` — settings.json keys, user vs project config, env vars
-- `/hooks` — hook events, schema, examples
-- `/mcp` — MCP server setup and configuration
-- `/slash-commands` — built-in and custom commands
-- `/ide-integrations` — VS Code, JetBrains setup
-- `/permissions` — allow/deny/ask permission system
-- `/plugins` — plugin architecture, skills, agents
-- `/keybindings` — keyboard shortcuts and customization
-- `/cli` — CLI flags and invocation
+This file lists every documentation URL. Use it to find the most relevant page before fetching content.
 
-Construct the URL as: `https://code.claude.com/docs/en/<section>`
+Then fetch the specific page:
+
+```
+https://code.claude.com/docs/en/<section>
+```
+
+Common sections:
+- `settings.md` — settings.json keys, user vs project config, env vars
+- `hooks.md` — hook events, schema, examples
+- `mcp.md` — MCP server setup and configuration
+- `commands.md` — built-in and custom commands
+- `vs-code.md` / `jetbrains.md` — IDE integrations
+- `permissions.md` — allow/deny/ask permission system
+- `plugins.md` — plugin architecture, skills, agents
+- `keybindings.md` — keyboard shortcuts and customization
+- `cli-reference.md` — CLI flags and invocation
+- `memory.md` — CLAUDE.md files and rules
 
 ### 2. CHANGELOG (for version-specific questions)
 
