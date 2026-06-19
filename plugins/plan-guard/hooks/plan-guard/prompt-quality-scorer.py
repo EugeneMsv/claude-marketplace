@@ -5,6 +5,8 @@ import json
 import os
 import sys
 
+from anthropic_client import AnthropicClient
+
 PROMPT_TEMPLATE = """\
 You are an expert prompt engineer with deep experience evaluating prompt quality for AI-assisted \
 software planning. A software engineer has just submitted a prompt to enter plan mode, where an AI \
@@ -22,7 +24,7 @@ Evaluate the prompt against these 6 principles of effective prompting:
 5. Think-first — Does it ask the AI to reason before acting for more thorough responses?
 6. Role — Does it define the AI's persona, expertise level, or communication style?
 
-Output format (strict — no preamble, no extra text):
+Output format (strict — no preamble, no extra text  ):
 Score: <N>/100
 <One sentence on the most impactful missing principle>. <One sentence on the second most impactful missing principle or how to improve the weakest area>.
 
@@ -31,22 +33,13 @@ PROMPT TO EVALUATE:
 """
 
 
-def call_anthropic(prompt_text: str) -> str:
-    import anthropic  # noqa: PLC0415
-
-    client = anthropic.Anthropic(
-        api_key=os.environ.get("ANTHROPIC_API_KEY"),
+def score_prompt(client: AnthropicClient, prompt_text: str) -> str:
+    """Evaluate the prompt with a higher-tier model for nuanced judgment."""
+    # ANTHROPIC_MODEL is a CLI alias ("opus"), not a real model id — resolve a concrete one.
+    model = os.environ.get("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-4-6")
+    return client.complete(
+        model=model, prompt=PROMPT_TEMPLATE.format(prompt=prompt_text), max_tokens=400
     )
-    model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
-    response = client.messages.create(
-        model=model,
-        max_tokens=400,
-        messages=[{"role": "user", "content": PROMPT_TEMPLATE.format(prompt=prompt_text)}],
-    )
-    block = response.content[0]
-    if not hasattr(block, "text"):
-        return ""
-    return block.text.strip()  # type: ignore[union-attr]
 
 
 def parse_response(raw: str) -> tuple[str, str]:
@@ -67,8 +60,8 @@ def parse_response(raw: str) -> tuple[str, str]:
 
 
 def main() -> None:
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print(json.dumps({"systemMessage": "[prompt-scorer] No API key detected, skipping"}))
+    if not AnthropicClient.has_credentials():
+        print(json.dumps({"systemMessage": "[prompt-scorer] No credentials detected, skipping"}))
         return
 
     hook_input = json.load(sys.stdin)
@@ -83,7 +76,7 @@ def main() -> None:
         return
 
     try:
-        raw = call_anthropic(prompt_text)
+        raw = score_prompt(AnthropicClient.from_env(), prompt_text)
         score_label, feedback = parse_response(raw)
         system_message = f"[prompt-scorer] Score: {score_label} — {feedback}"
     except Exception as e:  # noqa: BLE001
