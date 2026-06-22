@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""UserPromptSubmit/PreToolUse hook — injects project-specific planning requirements."""
+"""UserPromptSubmit/PreToolUse hook — injects planning requirements into plan mode.
+
+Two modes:
+- AI (default): scans project context and generates tailored requirements via the API.
+- Static (set PLAN_GUARD_STATIC_RULES): injects fixed rules only — no context, no API call.
+"""
 
 import json
 import os
@@ -26,39 +31,141 @@ BUILD_FILE_HINTS = {
 
 PROMPT_TEMPLATE = """\
 You are a planning assistant for a software engineer. Based on the project context below, \
-produce a concise systemMessage (plain-text bullet points) that the engineer will see \
-when entering plan mode. The message must specify:
+produce a set of planning directives. Your output is NOT read by a human — it is injected \
+VERBATIM as binding system directives into a separate planning LLM that is entering plan mode. \
+Optimize for machine compliance, not human readability. Output the directives the planning agent \
+must follow — the rules a plan has to satisfy — never the actual commands, branch names, or the \
+plan itself; state only what must be true, not the answers.
 
-0. That the plan MUST begin with a table of contents listing all tasks at the top
-1. That the FIRST task is optional git prep: stash unchanged work, switch to master/main, \
-pull latest, then create a new feature branch — auto-suggest the branch name from the Jira \
-ticket if one is present in the context(example TASK-123-logger-improvement, where TASK-123 - is jira ticket),\
-otherwise ask for it. "Optional" means the plan \
-must ASK the user during planning to confirm whether this git-prep task is required, and \
-include or omit it based on their answer
-2. That EVERY task's verification uses exact, directly-runnable CLI commands — not a vague \
-phrase like "build + test". Give the literal build and test invocations scoped to that task \
-(e.g. `bazel test //path/to:FooTest` or `gradle :module:test --tests '*.FooTest'`)
-3. That every task must end with a git commit in format "Task N: <description>"
-4. That the SECOND-TO-LAST task must EXHAUSTIVELY DISCOVER every LOCAL verification that \
-exists in this project's SDLC — scan the code, build files, local scripts, and existing memory \
-(NOT CI pipeline files) to identify ALL local verification phases (unit, integration, e2e/UAT, \
-smoke, contract, lint, etc.). Finding one type does NOT end the search: keep looking for every \
-other type. For each type found, list the EXACT, directly-runnable command (or the local \
-script/doc reference that runs it). List them as ORDERED, SEPARATE phases — unit first, then \
-integration, then e2e/smoke, etc. For any type NOT found after searching, state it explicitly, \
-e.g. "unit tests: not found, nothing to run" — never silently skip. This task IDENTIFIES how \
-to run each local verification, not merely "run the tests"
-5. That relevant documentation must be IDENTIFIED during planning (specific files/pages, \
-e.g. README.md, CLAUDE.md, a Confluence page), and the LAST task must explicitly NAME which \
-of those documents to update for this change — not a generic "update documentation"
+Format the output as numbered "MANDATE N:" headers using MUST/SHALL imperatives (not loose \
+prose bullets), break any multi-part rule into lettered atomic sub-points (3a, 3b, ...), and \
+END the output with the COMPLIANCE GATE described below. Your output MUST mirror this canonical \
+structure exactly (STEP 0 → MANDATE 0..6 → COMPLIANCE GATE) so it is shape-identical to the \
+project's static rule set.
 
-Be specific — use the actual commands from the project context. If you cannot determine \
-the exact command, use a sensible default for the detected build tool.
-Output ONLY the bullet-point message, no preamble.
+The output MUST contain, in this exact order:
+
+STEP 0 — CLASSIFY THE PLAN (must come first): instruct the agent to decide whether this is an \
+IMPLEMENTATION plan (produces and applies code changes) or a DISCOVERY plan (research, \
+investigation, analysis, design — no code changes) and to STATE the classification at the top of \
+the plan. If DISCOVERY: only MANDATE 0 and MANDATE 6 are binding; all build/test/commit/ \
+verification mandates are N/A. If IMPLEMENTATION: ALL mandates are binding.
+
+MANDATE 0: the plan MUST begin with a table of contents listing every task.
+
+MANDATE 1: the FIRST task is optional git prep — stash unchanged work, switch to master/main, \
+pull latest, then create a feature branch. "Optional" means the agent MUST ASK during planning \
+whether this task is needed and include/omit it per the answer. SHALL auto-suggest the branch \
+name from a Jira ticket if one is in context (e.g. TASK-123-logger-improvement, where TASK-123 \
+is the ticket), otherwise ask for it.
+
+MANDATE 2: every task that PRODUCES OR CHANGES CODE MUST include a verification step proving the \
+change works (unit test, build, or runnable check) — such a task is NOT complete without one; \
+other tasks SHOULD include verification wherever a meaningful check exists. Every verification \
+MUST use exact, directly-runnable CLI commands scoped to that task — never a vague phrase. \
+Include a concrete contrast built from THIS project's real build tool, e.g. ❌ "build + test" \
+vs ✅ `<literal command from context, like bazel test //path:FooTest>`.
+
+MANDATE 3: any task that CREATES TESTS MUST carry this rule embedded in the task itself.
+  3a. DURING PLANNING: each such task gets exactly ONE ordered subtask (created now via \
+TaskCreate), sequenced AFTER the task's implementation subtasks, whose sole job is to identify \
+and confirm the test use cases/scenarios.
+  3b. The plan MUST NOT enumerate the actual use cases or the per-case implementation subtasks.
+  3c. AT EXECUTION TIME: this subtask is started ONLY after the task's implementation work is \
+finished. It first presents the scenarios for the user's confirmation, then creates ordered \
+subtasks one per case (simplest → most comprehensive) and implements them strictly one at a \
+time — each written and verified before the next — NEVER in bulk.
+
+MANDATE 4: every task THAT CHANGES FILES MUST end with a git commit formatted "Task N: \
+<description>"; a task that changes no files (e.g. pure discovery/identification) requires no commit.
+
+MANDATE 5: the SECOND-TO-LAST task MUST exhaustively discover every LOCAL verification in this \
+project's SDLC (NOT CI pipeline files) — scan code, build files, local scripts, and existing \
+memory for ALL local phases (unit, integration, e2e/UAT, smoke, contract, lint, etc.). Finding \
+one type does NOT end the search.
+  5a. Each type FOUND MUST become its OWN ordered subtask created DURING PLANNING, naming its \
+exact command, in order: unit → integration → e2e/smoke → lint, etc.
+  5b. Each type NOT found MUST be stated explicitly (e.g. "integration tests: not found, nothing \
+to run") — never silently skipped.
+
+MANDATE 6: relevant documentation MUST be IDENTIFIED during planning (specific files/pages, e.g. \
+README.md, CLAUDE.md, a Confluence page); the LAST task MUST explicitly NAME which of those \
+documents to update for this change — not a generic "update documentation".
+
+COMPLIANCE GATE (MUST be the final section of the output): instruct that the plan is INVALID \
+unless it ENDS with a "Compliance Checklist" that lists each applicable mandate (0–6) and, on \
+one line each, the concrete evidence it is satisfied — task number, literal command, branch \
+name, or doc name — or marks it N/A with a reason. The evidence MUST be concrete, not a \
+restatement of the mandate. If any box cannot be ticked, the agent fixes the plan before \
+presenting it.
+
+Be specific — use the actual commands from the project context. If you cannot determine the \
+exact command, use a sensible default for the detected build tool. Output ONLY the directives \
+(STEP 0 through the COMPLIANCE GATE), no preamble.
 
 PROJECT CONTEXT:
 {context}
+"""
+
+STATIC_RULES = """\
+Planning requirements for this session.
+
+STEP 0 — CLASSIFY THE PLAN (do this first): decide whether this is an IMPLEMENTATION plan \
+(produces and applies code changes) or a DISCOVERY plan (research, investigation, analysis, \
+design — no code changes), and STATE the classification at the top of the plan.
+- If DISCOVERY: only MANDATE 0 and MANDATE 6 are binding; mark the build/test/commit/ \
+verification mandates N/A.
+- If IMPLEMENTATION: ALL mandates below are binding.
+
+MANDATE 0 — TABLE OF CONTENTS. The plan MUST begin with a table of contents listing every task.
+
+MANDATE 1 — GIT PREP (optional, ASK). The FIRST task MUST be optional git prep: stash unchanged \
+work, switch to master/main, pull latest, then create a feature branch. You MUST ASK during \
+planning whether this task is needed and include/omit it per the answer. If a Jira ticket is in \
+context, SHALL suggest the branch name from it (e.g. TASK-123-short-description); otherwise ask.
+
+MANDATE 2 — VERIFICATION REQUIRED + EXACT COMMANDS. Every task that PRODUCES OR CHANGES CODE \
+MUST include a verification step proving the change works (unit test, build, or runnable check); \
+such a task is NOT complete without one. Other tasks SHOULD include verification wherever a \
+meaningful check exists. Every verification MUST use exact, directly-runnable CLI commands scoped \
+to that task — never a vague phrase.
+  ❌ "build + test"
+  ✅ bazel test //path/to:FooTest
+  ✅ gradle :module:test --tests '*.FooTest'
+
+MANDATE 3 — TEST-CREATING TASKS. Any task that creates tests MUST carry this rule embedded in \
+the task itself.
+  3a. DURING PLANNING: each such task gets exactly ONE ordered subtask (created now via \
+TaskCreate), sequenced AFTER the task's implementation subtasks, whose sole job is to identify \
+and confirm the test use cases/scenarios.
+  3b. The plan MUST NOT enumerate the actual use cases or the per-case implementation subtasks.
+  3c. AT EXECUTION TIME: this subtask is started ONLY after the task's implementation work is \
+finished. It first presents the scenarios for the user's confirmation, then creates ordered \
+subtasks one per case (simplest → most comprehensive) and implements them strictly one at a \
+time — each written and verified before the next — NEVER in bulk.
+
+MANDATE 4 — COMMIT PER TASK. Every task THAT CHANGES FILES MUST end with a git commit formatted \
+"Task N: <description>". A task that changes no files (e.g. pure discovery/identification) \
+requires no commit.
+
+MANDATE 5 — VERIFICATION DISCOVERY. The SECOND-TO-LAST task MUST exhaustively discover every \
+LOCAL verification in this project's SDLC (NOT CI pipeline files): scan code, build files, local \
+scripts, and existing memory for ALL local phases (unit, integration, e2e/UAT, smoke, contract, \
+lint, etc.). Finding one type does NOT end the search.
+  5a. Each type FOUND MUST become its OWN ordered subtask created DURING PLANNING, naming its \
+exact command, in order:  lint → unit → integration → e2e/smoke, etc.
+  5b. Each type NOT found MUST be stated explicitly (e.g. "integration tests: not found, nothing \
+to run") — never silently skipped.
+
+MANDATE 6 — DOCUMENTATION. Relevant docs MUST be IDENTIFIED during planning (specific \
+files/pages, e.g. README.md, CLAUDE.md, a Confluence page); the LAST task MUST explicitly NAME \
+which of those documents to update for this change — not a generic "update documentation".
+
+COMPLIANCE GATE (MUST be the last thing in the plan). The plan is INVALID unless it ENDS with a \
+"Compliance Checklist" that lists each applicable mandate (0–6) and, on one line each, the \
+concrete evidence it is satisfied — task number, literal command, branch name, or doc name — or \
+marks it N/A with a reason. The evidence MUST be concrete, not a restatement of the mandate. If \
+any box cannot be ticked, fix the plan before presenting it.
 """
 
 
@@ -113,11 +220,23 @@ def build_requirements_message(client: AnthropicClient, context: str) -> str:
     return client.complete(model=model, prompt=PROMPT_TEMPLATE.format(context=context), max_tokens=2000)
 
 
-def main() -> None:
-    if not AnthropicClient.has_credentials():
-        print(json.dumps({"systemMessage": "[plan-enforcer] No credentials detected, skipping"}))
-        return
+def emit(hook_event: str, system_message: str, status_line: str) -> None:
+    """Print the hook response that injects `system_message` into plan-mode context."""
+    print(json.dumps({
+        "systemMessage": status_line,
+        "hookSpecificOutput": {
+            "hookEventName": hook_event,
+            "additionalContext": system_message,
+        },
+    }))
 
+
+def static_mode_enabled() -> bool:
+    """When set, inject fixed rules only — no context scan, no Anthropic call."""
+    return os.environ.get("PLAN_GUARD_STATIC_RULES", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def main() -> None:
     hook_input = json.load(sys.stdin)
     hook_event = hook_input.get("hook_event_name", "PreToolUse")
     cwd = hook_input.get("cwd", os.getcwd())
@@ -125,6 +244,16 @@ def main() -> None:
     # For UserPromptSubmit, only activate when actually in plan mode
     if hook_event == "UserPromptSubmit" and hook_input.get("permission_mode") != "plan":
         print("{}")
+        return
+
+    # Static mode: inject the fixed rules verbatim, skipping context + model entirely
+    if static_mode_enabled():
+        emit(hook_event, STATIC_RULES,
+             "[plan-enforcer] 📋 Static planning rules injected (AI generation off).")
+        return
+
+    if not AnthropicClient.has_credentials():
+        print(json.dumps({"systemMessage": "[plan-enforcer] No credentials detected, skipping"}))
         return
 
     try:
@@ -147,14 +276,7 @@ def main() -> None:
         }))
         return
 
-    output = {
-        "systemMessage": status_line,
-        "hookSpecificOutput": {
-            "hookEventName": hook_event,
-            "additionalContext": system_message,
-        },
-    }
-    print(json.dumps(output))
+    emit(hook_event, system_message, status_line)
 
 
 if __name__ == "__main__":
