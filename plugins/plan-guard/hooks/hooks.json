@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/plan-guard/plan-mode-enforcer.py",
+            "command": "PLAN_GUARD_STATIC_RULES=1 python3 ${CLAUDE_PLUGIN_ROOT}/hooks/plan-guard/plan-mode-enforcer.py",
             "timeout": 15
           }
         ]
