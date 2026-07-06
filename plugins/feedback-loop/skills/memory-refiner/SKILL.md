@@ -44,6 +44,12 @@ Analyze recent conversation history to identify:
 - Time-saving shortcuts discovered
 - Automation opportunities
 
+**Permission/Policy Patterns (feed `autoMode`):**
+- Command classes the user repeatedly approves → candidate for `autoMode.allow`
+- Actions the user repeatedly hesitates on or asks to confirm → `autoMode.soft_deny`
+- Actions the user refuses outright (prod writes, secret exposure, third-party exfil) → `autoMode.hard_deny`
+- New hosts, projects, services, or env conventions mentioned → `autoMode.environment`
+
 Examine at least 10-20 recent exchanges. Look for patterns that appear 2+ times.
 
 ### Phase 2: Memory Audit
@@ -59,6 +65,7 @@ Read and analyze all memory files:
 - `~/.skills/**/*.md` - skills memory
 - `~/.agents/**/*.md` - agents memory
 - `~/.claude/rules/*.md` - agents memory
+- `~/.claude/settings.json` → `autoMode` block - autonomous-mode permission policy (allow / soft_deny / hard_deny / environment lists)
 
 
 **Audit checklist:**
@@ -67,6 +74,7 @@ Read and analyze all memory files:
 - Detect conflicts (contradictory instructions)
 - Flag outdated information (tool usage has evolved)
 - Note redundancies (same instruction in multiple places)
+- `autoMode` coverage: do approve/deny patterns from conversation match the allow/soft_deny/hard_deny lists? Are referenced hosts/projects/services present in `environment`? Flag policy gaps and any entry contradicting an observed user decision
 
 ### Phase 3: Synthesis
 
@@ -202,6 +210,7 @@ Eliminates repeated corrections, aligns with user's established workflow prefere
 - **Global file**: `~/.claude/CLAUDE.local.md` — general preferences and cross-cutting instructions
 - **Auto-memory**: project-specific `.claude/memory/*.md` is secondary; if an entry is generic enough to apply across projects, promote it to `rules/` or `CLAUDE.local.md` instead
 - Domain-specific → `~/.claude/[domain].md`
+- **Permission policy** → `~/.claude/settings.json` `autoMode` — route here (not a rule file) when the learning is about what to auto-allow/deny in autonomous mode or about the operating environment (hosts, projects, services). Preserve the `$defaults` sentinel; append new entries as concise standalone strings. This is a behavioral-gate change — always present diffs for explicit approval before editing
 - Standards/policies → `~/.claude/CLAUDE.md` (warn: managed file, do not edit directly)
 
 ## Implementation Steps

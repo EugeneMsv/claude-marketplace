@@ -6,7 +6,10 @@ json=$(cat)
 
 log_dir="$HOME/.claude/feedback-loop"
 mkdir -p "$log_dir"
-log_file="$log_dir/tool-detector.jsonl"
+
+# Rolling monthly log: a fresh file is started each month (tool-detector-YYYY-MM.jsonl)
+month=$(date '+%Y-%m')
+log_file="$log_dir/tool-detector-$month.jsonl"
 
 tool_name=$(echo "$json" | jq -r '.tool_name')
 command=$(echo "$json" | jq -r '
@@ -27,9 +30,4 @@ jq -cn \
   '{timestamp:$ts, tool:$tool, command:$cmd}' \
   >> "$log_file"
 
-# Purge entries older than 3 months
-cutoff=$(date -v-3m '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -d '3 months ago' '+%Y-%m-%d %H:%M:%S')
-tmp=$(mktemp)
-jq -c --arg cutoff "$cutoff" 'select(.timestamp >= $cutoff)' "$log_file" > "$tmp" && mv "$tmp" "$log_file"
-
-echo "{\"systemMessage\": \"[feedback-loop/tool-detector] $tool_name logged to $log_file\"}"
+#echo "{\"systemMessage\": \"[feedback-loop/tool-detector] $tool_name logged to $log_file\"}"

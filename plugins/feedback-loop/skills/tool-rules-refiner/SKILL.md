@@ -12,7 +12,7 @@ Analyze `~/.claude/feedback-loop/fails.jsonl` to extract failure patterns and pr
 
 ## Target File
 
-All output goes to `~/.claude/guides/Tools.md`. Never scatter rules into `CLAUDE.local.md` or other files unless explicitly asked.
+All output goes to `~/.claude/rules/tools.md`. Never scatter rules into `CLAUDE.local.md` or other files unless explicitly asked.
 
 ## Core Workflow
 
@@ -31,12 +31,10 @@ Count occurrences per error pattern. Failures appearing 2+ times are high-priori
 ### Phase 2: Memory Audit
 
 Read all memory files to cross-reference:
-- `~/.claude/guides/Tools.md` — primary target
-- `~/.claude/guides/Workflows.md` — git/workflow rules may already live here
+- `~/.claude/rules/tools.md` — primary target
+- All `*.md` files under `~/.claude/rules/` — for deduplication and conflict detection
 - `~/.claude/CLAUDE.md` — global
-- `~/.claude/CLAUDE.local.md` — global overrides
-- `~/.claude/guides/Coding.md` — coding patterns
-- `~/.claude/guides/*` — all other guides
+- `~/.claude/CLAUDE.local.md` — global overrides (if present)
 
 **Check for:**
 - Rule already exists → skip (no duplicate)
@@ -65,17 +63,17 @@ See `references/format.md` for the target `Tools.md` structure and suggestion ou
 Present suggestions grouped by severity: STRENGTHEN first, then ADD, then CONFLICT.
 
 After user approval:
-1. Apply changes to `guides/Tools.md`
+1. Apply changes to `~/.claude/rules/tools.md`
 2. If strengthening: replace the old weaker rule inline
 3. Verify no duplicate lines exist after update
-4. Confirm `guides/Tools.md` structure is intact
+4. Confirm `~/.claude/rules/tools.md` structure is intact
 
 ## Validation Checklist
 
 Before presenting suggestions:
 - ✓ Each rule backed by 2+ log entries (or 1 for STRENGTHEN)
 - ✓ Rule not already present verbatim or semantically
-- ✓ No contradiction with `Workflows.md` or `CLAUDE.local.md`
+- ✓ No contradiction with `rules/workflows.md` or `CLAUDE.local.md`
 - ✓ Rule is a one-liner
 - ✓ Grouped under correct tool section and sub-group
 - ✓ STRENGTHEN cases show old rule vs. new rule diff

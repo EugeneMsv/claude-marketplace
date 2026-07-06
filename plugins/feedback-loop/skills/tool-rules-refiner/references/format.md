@@ -2,7 +2,7 @@
 
 ## Target File Structure
 
-`~/.claude/guides/Tools.md` uses this layout:
+`~/.claude/rules/tools.md` uses this layout:
 
 ```markdown
 # Tools usage
@@ -54,7 +54,7 @@ Number every suggestion sequentially across all severity groups. The user will r
 
 ### 1. 🔴 STRENGTHEN — [Tool] / [Sub-group]
 
-**File:** `~/.claude/guides/Tools.md`
+**File:** `~/.claude/rules/tools.md`
 **Section:** `## Bash > ### Git`
 
 **Old rule:**
@@ -69,7 +69,7 @@ Number every suggestion sequentially across all severity groups. The user will r
 
 ### 2. 🟡 ADD — [Tool] / [Sub-group]
 
-**File:** `~/.claude/guides/Tools.md`
+**File:** `~/.claude/rules/tools.md`
 **Section:** `## Bash > ### jq`
 
 **Rule:**
@@ -89,9 +89,9 @@ Number every suggestion sequentially across all severity groups. The user will r
 ## Deduplication Logic
 
 Before adding any rule, check:
-1. `grep -i "<keyword>" ~/.claude/guides/Tools.md` — verbatim match?
+1. `grep -i "<keyword>" ~/.claude/rules/tools.md` — verbatim match?
 2. Semantic check: does any existing rule cover the same failure mode?
-3. Does `Workflows.md` already have a git rule covering this?
+3. Does `rules/workflows.md` already have a git rule covering this?
 
 If duplicate found → skip silently (don't report as suggestion).
 If semantically covered but weaker → STRENGTHEN instead of ADD.

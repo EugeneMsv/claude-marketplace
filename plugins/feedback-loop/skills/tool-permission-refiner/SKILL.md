@@ -1,6 +1,6 @@
 ---
 name: msv-tool-permission-refiner
-description: This skill should be used when the user asks to "audit tool permissions", "refine permissions from log", "check what tools need permissions", "analyze tool usage permissions", "permission audit", "run tool-permission-refiner", "what tools are unmatched", "tighten permissions", or wants to derive permission rules from ~/.claude/feedback-loop/tool-detector.jsonl into settings.json allow/ask/deny lists. Cross-references real tool usage data against all permission layers and applies security-first, principle-of-least-privilege suggestions.
+description: This skill should be used when the user asks to "audit tool permissions", "refine permissions from log", "check what tools need permissions", "analyze tool usage permissions", "permission audit", "run tool-permission-refiner", "what tools are unmatched", "tighten permissions", or wants to derive permission rules from the monthly ~/.claude/feedback-loop/tool-detector-YYYY-MM.jsonl logs into settings.json allow/ask/deny lists. Cross-references real tool usage data against all permission layers and applies security-first, principle-of-least-privilege suggestions.
 version: 1.0.0
 allowed-tools: Read, Grep, Glob, Edit
 ---
@@ -9,7 +9,7 @@ allowed-tools: Read, Grep, Glob, Edit
 
 ## Purpose
 
-Analyze `~/.claude/feedback-loop/tool-detector.jsonl` to find what tools and commands are actually used, cross-reference against all permission layers (user / local / project), and propose pragmatic changes to `allow`, `ask`, and `deny` arrays. Default stance: allow reads on non-secret paths and writes to expected project/work paths — restrict only sensitive targets, credentials, and genuinely destructive operations.
+Analyze the rolling monthly logs `~/.claude/feedback-loop/tool-detector-YYYY-MM.jsonl` (current and previous month) to find what tools and commands are actually used, cross-reference against all permission layers (user / local / project), and propose pragmatic changes to `allow`, `ask`, and `deny` arrays. The detector hook writes a fresh log file each month (it does not delete old files), so the current + previous month files are the active analysis window; older months remain on disk until pruned. Default stance: allow reads on non-secret paths and writes to expected project/work paths — restrict only sensitive targets, credentials, and genuinely destructive operations.
 
 ## Target Files (in precedence order)
 
@@ -23,8 +23,14 @@ Precedence: `deny > ask > allow`, `project > local > user`. Suggestions go to th
 
 ### Phase 1: Parse Log
 
+Read the current and previous month logs (skip any that don't exist):
+
 ```bash
-jq -r '[.timestamp, .tool, .command] | @tsv' ~/.claude/feedback-loop/tool-detector.jsonl | sort
+cur=$(date '+%Y-%m')
+prev=$(date -v-1m '+%Y-%m' 2>/dev/null || date -d '1 month ago' '+%Y-%m')
+jq -r '[.timestamp, .tool, .command] | @tsv' \
+  ~/.claude/feedback-loop/tool-detector-"$cur".jsonl \
+  ~/.claude/feedback-loop/tool-detector-"$prev".jsonl 2>/dev/null | sort
 ```
 
 Group entries by:
@@ -34,6 +40,20 @@ Group entries by:
 Count occurrences per pattern. Every occurrence counts — unlike failure analysis, a single tool use is enough to warrant a permission review.
 
 Build usage inventory: `{ tool, pattern, count, example_commands[] }`.
+
+**Suggest log cleanup (don't auto-run):** the hook keeps every monthly file forever. After parsing, list any `tool-detector-YYYY-MM.jsonl` files older than 3 months and offer to delete them — let the user confirm before removing anything.
+
+```bash
+# List monthly logs older than 3 months (review before deleting)
+cutoff=$(date -v-3m '+%Y-%m' 2>/dev/null || date -d '3 months ago' '+%Y-%m')
+for f in ~/.claude/feedback-loop/tool-detector-*.jsonl; do
+  [ -e "$f" ] || continue
+  m=$(basename "$f"); m=${m#tool-detector-}; m=${m%.jsonl}
+  [[ "$m" < "$cutoff" ]] && echo "$f"
+done
+```
+
+If any are listed, present them and ask: "Delete these N stale log files? (y/n)". Only remove on explicit confirmation.
 
 ### Phase 2: Load All Permission Layers
 
