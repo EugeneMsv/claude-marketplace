@@ -8,19 +8,21 @@ Expert code review and interactive GitLab MR comment resolution.
 
 Trigger: "Review my feature branch", "PR review", "diff review"
 
-Performs a senior engineer code review against `origin/main`:
+Performs a senior engineer code review against the repo's actual default branch (auto-detected — `main`, `master`, or otherwise):
 
-1. Fetches all remote branches and generates a diff
-2. Uses git worktrees to get full context for both branches
-3. Identifies affected data flows with layer-by-layer ASCII diagrams (Web → Domain → Persistence → External)
-4. Shows model/domain/DTO changes as a coloured diff tree (🔴 removed, 🟢 added, 🔵 changed, ⚪ unchanged)
-5. Reviews each major change for logic, performance, security, SOLID violations, and test coverage
-6. Produces a scored review (0–100) with copy-ready PR notes
-7. Exports the full review to a markdown file in `.claude/`
+1. Fetches all remote branches, detects the default branch, and generates a diff via explicit merge-base
+2. Determines repo mode (monorepo by default, or per-service) — asks the user when ambiguous
+3. In per-service mode, uses git worktrees for full context on both branches; in monorepo mode, relies on the diff plus targeted `git show`/Read/Grep to avoid slow full checkouts
+4. Identifies affected data flows with layer-by-layer ASCII diagrams (Web → Domain → Persistence → External)
+5. Shows model/domain/DTO changes as a coloured diff tree (🔴 removed, 🟢 added, 🔵 changed, ⚪ unchanged)
+6. Reviews each major change for logic, performance, security, SOLID violations, and test coverage
+7. Produces a scored review (0–100) with copy-ready PR notes
+8. Exports the full review to a markdown file in `.claude/code-review/`
 
 **Rules:**
 - Never posts to GitLab unless explicitly instructed
-- Always compares against `origin/main` (not local main)
+- Always compares against the auto-detected default branch (not hardcoded to `main`, not local)
+- Skips worktree creation by default in monorepo mode; always uses worktrees in per-service mode
 - Skips test files in detail, import-only changes, and formatting handled by spotlessApply
 
 ---
