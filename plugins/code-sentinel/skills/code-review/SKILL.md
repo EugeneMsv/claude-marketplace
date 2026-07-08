@@ -1,6 +1,15 @@
 ---
 name: msv-code-review
-description: Makes a code review based on branch name
+description: |
+  This skill should be used when the user asks to "review my branch",
+  "review this MR", "PR review", "diff review", or mentions reviewing
+  changes, analyzing commits, or comparing branches. Supports both
+  monorepo (default) and per-service repos — asks which mode applies
+  when ambiguous. Auto-detects the actual default branch (main or
+  master) instead of assuming main. In monorepo mode, diffs via
+  explicit merge-base to avoid noise from unrelated commits landed on
+  the default branch since the feature branch was cut; per-service
+  mode keeps the original triple-dot diff.
 ---
 
 # Code Reviewer Skill
@@ -19,7 +28,14 @@ You are an expert Senior Software Engineer performing a code review.
     - Ask user for branch name if not provided
     - Use `git fetch --all` to update all remote branches
 
-2. **Check for GitLab MR Context** (if applicable)
+2. **Determine Repository Mode**
+    - Two modes: **monorepo** (default) and **per-service** (a repo dedicated to a single service/app)
+    - Infer mode from context where possible (repo name/path conventions, many unrelated top-level service dirs, explicit user statement)
+    - If ambiguous, **ASK the user** which mode applies before proceeding
+    - If unspecified after asking, **default to monorepo mode**
+    - Affects worktree usage in step 5 (Analyze Changes) only — does NOT affect diff generation, default-branch detection, or any other step
+
+3. **Check for GitLab MR Context** (if applicable)
     - Use `glab mr list --source-branch <branch-name>` to find associated MR
     - If MR exists, use `glab mr view <mr-number> --comments` to retrieve all comments
     - Analyze MR comments to identify:
@@ -29,148 +45,51 @@ You are an expert Senior Software Engineer performing a code review.
         - **Historical Context**: Previous iterations and decisions
     - Use this context to inform the review (do NOT store separately)
 
-3. **Generate Diff**
-    - When reviewing feature branches, use `git diff origin/main...<branch>` to get changes.
-    - Store in `.claude/diff-<branch>-origin-main.txt`
+4. **Generate Diff**
+    - Detect the actual default branch in BOTH modes (do NOT assume `main`):
+      ```bash
+      DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo "main")
+      ```
+    - **Monorepo mode** (explicit merge-base — isolates the diff from unrelated commits that landed on the default branch after the feature branch was cut, which is common in large monorepos):
+      - Compute the merge-base and log the resulting SHA:
+        ```bash
+        git merge-base origin/<default-branch> origin/<branch>
+        ```
+      - Diff from that merge-base to the branch tip (explicit two-step form, not a bare triple-dot shorthand — keeps the merge-base SHA visible as its own auditable step):
+        ```bash
+        git diff <merge-base-sha>..origin/<branch> > .claude/code-review/diff-<branch>-<default-branch>.txt
+        ```
+    - **Per-service mode** (original triple-dot approach — sufficient for a single-service repo where default-branch churn is low):
+      ```bash
+      git diff origin/<default-branch>...origin/<branch> > .claude/code-review/diff-<branch>-<default-branch>.txt
+      ```
     - If diff is empty, verify branch exists and has changes
 
-4. **Analyze Changes**
+5. **Analyze Changes**
     - Read the diff file thoroughly
-    - Use git worktree for main branch and another one for provided branch
+    - In **per-service mode**, use git worktree for the default branch and another one for the target branch (see 5.1)
+    - In **monorepo mode**, skip worktree creation by default; rely on the diff file plus targeted `git show <sha>:<path>`, Read, and Grep against the current working tree (see 5.1)
     - Identify major changes (exclude tests, minor refactors, comments)
     - Focus on: new logic, architectural changes, significant dependency changes
     - Always MUST identify the data flows which are affected by the changes
     - Always MUST identify Model/domain/POJO/DTO changes
-    - Always MUST use git worktree
 
-4.1 **Git worktree**
-Use it per each branch in the diff to get the next:
-- The whole picture of the affected files in the diff
-- The flows comparison/changes (look for the 3.2 to get the details)
-- To get any other details which are not in the diff, but might be better for the understanding by human reviewer
+5.1 **Git worktree (mode-conditional)**
+- **Per-service mode**: Always create a worktree per branch (default branch + target branch) — cheap for a single-service repo, gives full context for:
+    - The whole picture of the affected files in the diff
+    - The flows comparison/changes (see 5.2)
+    - Any other details not in the diff but useful for the human reviewer
+- **Monorepo mode**: Do NOT create worktrees by default — checking out 100k+ files is slow for little marginal value. Instead:
+    - `git show <merge-base-sha>:<path>` / `git show origin/<branch>:<path>` to read specific file versions without a full checkout
+    - Read and Grep against the current working tree for surrounding context
+    - Only fall back to a worktree if the user explicitly asks, or targeted `git show`/Read/Grep genuinely can't answer a question needing broader repo-wide context
 
-4.2 **Identifying the affected flows**
-1. **Entry Point**: REST endpoint, message topic, scheduled job, sny other external integration
-2. **Layer Transitions**: Web → Domain → Persistence → External
-3. **Changed Components**: Mark with 🔵 or 🟢
-4. **New Logic**: Highlight new calculators, validators, services with 🟢
-5. **Data Transformations**: Show mapper invocations
+5.2 **Identifying the affected flows** and 5.3 **Model/domain/POJO/DTO changes approach**
 
-Once the flows are identified, for each flow, the whole flow diagram must be presented and the changed part
-   must be reflected.
-    Example:
+Load `references/flow-diagram-examples.md` for the full checklist and worked ASCII examples for
+both sub-steps before producing flow diagrams or model diff trees.
 
-┌─────────────────────────────────────────────────────────────────────┐
-│                POST /api/v1/subscriptions/initiate                  │
-└─────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  WEB LAYER (my-service-web)                                         │
-│  ├─ OrderInitiationController                                       │
-│  │   └─ Receives JsonOrderInitiationRequest                         │
-│  │                                                                  │
-│  └─ JsonOrderMapper 🔵                                              │
-│      └─ Transforms: JSON DTO 🔵 → Domain Model 🔵                   │
-└─────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  DOMAIN LAYER (my-service-domain)                                   │
-│  └─ OrderInitiationService 🔵                                       │
-│      ├─ 1. Business logic validation                                │
-│      ├─ 2. Calculate order schedule 🟢                              │
-│      ├─ 3. Create Order aggregate                                   │
-│      ├─ 4. Call OrderRepository.save()                              │
-│      └─ 5. Call PublicationService.publish()                        │
-└─────────────────────────────────────────────────────────────────────┘
-                                        │
-                        ┌───────────────┴───────────────┐
-                        ▼                               ▼
-┌────────────────────────────────────┐  ┌────────────────────────────────┐
-│ PERSISTENCE LAYER                  │  │ EXTERNAL LAYER                 │
-│ (my-service-persistence)           │  │ (my-service-external)          │
-│                                    │  │                                │
-│ ├─ JdbcOrderRepository             │  │ └─ PublicationService          │
-│ │   └─ INSERT order                │  │     └─ Kafka event publisher   │
-│ │       (MASTER DB)                │  │         order.initiated        │
-│ │                                  │  │                                │
-│ ├─ JdbcOrderItemRepository         │  │                                │
-│ │   └─ INSERT order items          │  │                                │
-│ │                                  │  │                                │
-│ ├─ JdbcOrderActionRepository       │  │                                │
-│ │   └─ INSERT audit trail          │  │                                │
-│ │                                  │  │                                │
-│ └─ JdbcOrderSnapshotRepo           │  │                                │
-│     └─ INSERT order snapshot       │  │                                │
-│                                    │  │                                │
-│ [MySQL Master]                     │  │ [Kafka]                        │
-└────────────────────────────────────┘  └────────────────────────────────┘
-                                        │
-                                        ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  RESPONSE FLOW                                                      │
-│  ├─ Domain → JsonOrderMapper 🔵                                     │
-│  └─ JsonOrderInitiationResponse                                     │
-└─────────────────────────────────────────────────────────────────────┘
-
-       Legend:
-       - 🔴 = Removed component
-       - 🟢 = Added component
-       - ⚪ = Unchanged component
-       - 🔵 = Transitively Changed component
-
-4.3 **Model/domain/POJO/DTO** changes approach
-        - If the structure is changed analyze the full fields hierarchy/tree of the class (starting from the root class).
-        - Identify the root aggregate first (e.g., Subscription, Order, User), It is usually used by major components in the flow from 3.2
-        - Show complete nested hierarchy from root to changed field
-        - Never present isolated nested objects without parent context
-        - Combine nested structures into single tree (not separate sections)
-        - Show ALL intermediate levels - no skipped fields
-        - Draw a human-readable diff tree where mark:
-          - Red the removed nodes
-          - Green the new nodes
-          - Blue the changed object nodes
-          - White not changed nodes/fields
-        - Always include inner fields structure of the changed/removed/added nodes.
-      example:
-      com.example.payments
-      └── config
-      └─🔵 OrderConfig
-      ├── ⚪ orderId: String
-      ├── 🔴 customerId: String
-      ├── 🟢 customer: CustomerInfo
-      │   ├── 🟢 id: String
-      │   ├── 🟢 email: String
-      │   └── 🟢 tier: Integer
-      ├── ⚪ amount: BigDecimal
-      ├── 🔴 paymentMethod: String
-      ├── 🟢 payment: PaymentInfo
-      │   ├── 🟢 method: String
-      │   ├── 🟢 provider: String
-      │   └── 🟢 fees: Money
-      │       ├── 🟢 amount: BigDecimal
-      │       └── 🟢 currency: Currency
-      ├── 🔴 status: String
-      ├── 🟢 status: OrderStatus(enum: 🟢VALUE1, ⚪VALUE2, 🔴VALUE3)
-      ├── ⚪ createdAt: Instant
-      ├── 🔴 shippingAddress: String
-      └── 🟢 shipping: ShippingInfo
-      ├── 🔵 address: Address
-      │   ├── 🔴 street: String
-      │   ├── 🟢 city: String
-      │   └── 🟢 postalCode: String
-      ├── 🟢 carrier: String
-      └── 🔵 trackingNumber: 🟢String 🔴Integer
-
-       Legend:
-       - 🔴 = Removed field
-       - 🟢 = Added field
-       - ⚪ = Unchanged field
-       - 🔵 = Changed object field
-
-
-5. **Prioritize by Impact**
+6. **Prioritize by Impact**
     - Reorder from most to least impactful:
         - Core functionality changes (highest priority)
         - API/interface modifications
@@ -178,7 +97,7 @@ Once the flows are identified, for each flow, the whole flow diagram must be pre
         - Algorithm updates
         - Configuration changes (lowest priority)
 
-6. **Review Each Major Change**
+7. **Review Each Major Change**
 
    For each prioritized change, analyze:
 
@@ -189,88 +108,28 @@ Once the flows are identified, for each flow, the whole flow diagram must be pre
     - **SOLID Principles**: SRP, OCP, LSP, ISP, DIP violations
     - **Maintainability**: Clarity, naming, documentation
 
-7. **Test Coverage**
+8. **Test Coverage**
     - Check if changes are covered by tests
     - Suggest test cases for untested changes
     - Verify test structure follows Given-When-Then
 
-8. **Provide Review Summary**
+9. **Provide Review Summary**
 
-   Format:
-   Code Review:
-
-MR Context (if GitLab MR exists)
-
-- MR #: [number]
-- Reviewer Requests Addressed:
-  - ✅ [Request 1] - [How addressed in code]
-  - ✅ [Request 2] - [How addressed in code]
-  - ⚠️  [Unresolved request] - [Status/concern]
-- Key Discussion Points:
-  - [Point 1 from comments]
-  - [Point 2 from comments]
-
-Major Changes (Prioritized)
-
-1. [Most impactful change]
-2. [Second most impactful]
-   ...
-
-Detailed Analysis
-
-
-Change 1: [Title]
-
-     Location: path/to/file.java:123
-
-     What Changed: [Explanation]
-
-     Concerns:
-- ⚠️  [Issue 1]
-- ⚠️  [Issue 2]
-
-  Code Snippet:
-  // relevant code
-
-  Test Coverage: ✅ Covered / ❌ Missing
-
-  ---
-     [Repeat for each major change]
-
-PR Notes (Copy to PR Description)
-
-
-     Summary: [1-2 sentence overview]
-
-     Action Items:
-- [Specific fix needed]
-- [Test to add]
-- [Question for author]
-
-  Questions:
-- [Question 1]
-- [Question 2]
-
-Review Score: X/100
-
-
-     Rating Scale:
-- 90-100: Excellent, minimal changes needed
-- 70-89: Good, minor improvements suggested
-- 50-69: Acceptable, moderate changes recommended
-- 30-49: Needs work, significant concerns
-- 1-29: Major issues, substantial revision required
-
-  Justification: [Why this score]
-
+   Load `references/review-summary-template.md` for the exact output format and fill it in with
+   this review's findings.
 
 10. **Export final review to markdown**
 
 ### Rules
 
 - MUST use `git --no-pager` for clean output
-- MUST compare against `origin/main` (not local main)
-- MUST store diff in `.claude/` folder
+- MUST auto-detect the default branch via `git symbolic-ref refs/remotes/origin/HEAD` (fallback to `main`) — NEVER hardcode `origin/main`
+- In **monorepo mode**, MUST compute the diff via explicit merge-base (`git merge-base origin/<default-branch> origin/<branch>`, then `git diff <merge-base-sha>..origin/<branch>`) — NEVER a bare triple-dot shorthand
+- In **per-service mode**, use the original triple-dot diff (`git diff origin/<default-branch>...origin/<branch>`)
+- MUST store diff and review artifacts under `.claude/code-review/` (not flat in `.claude/`)
+- MUST ask the user for mode (monorepo vs. per-service) when it cannot be confidently inferred, defaulting to monorepo if still unspecified
+- MUST skip git worktree creation by default in monorepo mode — use the diff file plus targeted `git show`/Read/Grep instead
+- MUST use git worktree per branch by default in per-service mode
 - MUST use `mcp__sequentialthinking__sequentialthinking` for complex analysis
 - MUST reference specific file paths with line numbers
 - MUST include code snippets for top 3 most significant changes
@@ -284,3 +143,10 @@ Review Score: X/100
 ### Example Invocation
 
 User: "Review my feature branch feature/user-authentication"
+
+## Additional Resources
+
+### Reference Files
+
+- **`references/flow-diagram-examples.md`** - Full checklist and worked ASCII examples for identifying affected flows (5.2) and model/DTO diff trees (5.3)
+- **`references/review-summary-template.md`** - Exact output format for the final review summary (step 9)
