@@ -1,12 +1,13 @@
 # feedback-loop
 
-Monitors tool usage and failures, then helps refine permissions, rules, and memory based on real data.
+Monitors tool usage, prompts, and failures, then helps refine permissions, rules, and memory based on real data.
 
 ## What It Does
 
-Two hooks run silently in the background on every Claude session:
+Three hooks run silently in the background on every Claude session:
 
-- **tool-detector** — logs every tool invocation to `~/.claude/feedback-loop/tool-detector.jsonl`
+- **tool-detector** — logs every tool invocation to `~/.claude/feedback-loop/tool-detector-YYYY-MM.jsonl`
+- **prompt-detector** — logs every non-empty user prompt (prompt text, timestamp, session_id) to `~/.claude/feedback-loop/prompt-detector-YYYY-Www.jsonl`, for later prompt analysis. Always emits a bare `{}` — it's a pure side-effect logger and never injects context or interferes with other `UserPromptSubmit` hooks (e.g. `plan-guard`, `task-seeder`).
 - **fail-detector** — logs every tool failure to `~/.claude/feedback-loop/fails.jsonl`
 
 Three skills analyse those logs and propose targeted improvements:
@@ -23,11 +24,12 @@ All runtime data lives under `~/.claude/feedback-loop/`:
 
 ```
 ~/.claude/feedback-loop/
-├── tool-detector.jsonl   # All tool invocations (rolling 3-month window)
-└── fails.jsonl           # All tool failures (rolling 3-month window)
+├── tool-detector-YYYY-MM.jsonl     # Tool invocations, one file per calendar month
+├── prompt-detector-YYYY-Www.jsonl  # User prompts, one file per ISO week
+└── fails.jsonl                     # Tool failures (rolling 3-month window)
 ```
 
-Entries older than 3 months are purged automatically on each hook run.
+Only `fails.jsonl` purges old entries automatically (on each hook run, anything older than 3 months is dropped). `tool-detector` and `prompt-detector` rotate into a fresh file each period instead — old files are kept as-is; delete them by hand if you want to reclaim space.
 
 ## Installation
 

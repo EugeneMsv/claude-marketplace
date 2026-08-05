@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "name": "eug-msv-claude-marketplace",
   "description": "Plugin marketplace for Claude Code from Eugene Moiseev",
   "updated": "2026-08-05",
@@ -46,8 +46,8 @@
     {
       "name": "feedback-loop",
       "source": "./plugins/feedback-loop",
-      "description": "Feedback Loop — monitors tool usage and failures, refines permissions, rules, and memory",
-      "version": "0.1.1",
+      "description": "Feedback Loop — monitors tool usage, prompts, and failures; refines permissions, rules, and memory",
+      "version": "0.1.2",
       "author": {
         "name": "Eugene Moiseev"
       },
@@ -58,6 +58,7 @@
         "permissions",
         "rules",
         "memory",
+        "prompts",
         "refinement"
       ]
     },

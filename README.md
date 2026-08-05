@@ -50,13 +50,13 @@ Enforces use of official Claude Code docs before answering any questions about C
 
 ### feedback-loop
 
-Monitors tool usage and failures, then helps refine permissions, rules, and memory files based on real usage data.
+Monitors tool usage, prompts, and failures, then helps refine permissions, rules, and memory files based on real usage data.
 
 **Skills:** `tool-permission-refiner`, `tool-rules-refiner`, `memory-refiner`
 
-**Hooks:** `tool-detector` (PreToolUse), `fail-detector` (PostToolUseFailure)
+**Hooks:** `tool-detector` (PreToolUse), `prompt-detector` (UserPromptSubmit), `fail-detector` (PostToolUseFailure)
 
-**Data directory:** `~/.claude/feedback-loop/` — `tool-detector.jsonl`, `fails.jsonl`
+**Data directory:** `~/.claude/feedback-loop/` — `tool-detector-YYYY-MM.jsonl`, `prompt-detector-YYYY-Www.jsonl`, `fails.jsonl`
 
 **[Full Documentation →](plugins/feedback-loop/README.md)**
 
