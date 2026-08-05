@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "name": "eug-msv-claude-marketplace",
   "description": "Plugin marketplace for Claude Code from Eugene Moiseev",
   "updated": "2026-08-05",
@@ -99,8 +99,8 @@
     {
       "name": "task-seeder",
       "source": "./plugins/task-seeder",
-      "description": "Task Seeder — drafts a suggested Task N breakdown for multi-step prompts outside plan mode, as a non-binding starting point for TaskCreate",
-      "version": "0.1.1",
+      "description": "Task Seeder — reminds the agent to consider splitting multi-part prompts into TaskCreate tasks, especially when part of the ask needs exploration/research first",
+      "version": "0.1.2",
       "author": {
         "name": "Eugene Moiseev"
       },
@@ -109,7 +109,7 @@
       "tags": [
         "planning",
         "tasks",
-        "drafting",
+        "reminders",
         "productivity"
       ]
     }

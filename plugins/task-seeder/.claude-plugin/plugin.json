@@ -1,5 +1,5 @@
 {
   "name": "task-seeder",
-  "version": "0.1.1",
-  "description": "Task Seeder — drafts a non-binding numbered Task N breakdown for multi-step prompts outside plan mode, as a starting point for TaskCreate"
+  "version": "0.1.2",
+  "description": "Task Seeder — reminds the agent to consider splitting multi-part prompts into TaskCreate tasks, especially when part of the ask needs exploration/research first"
 }
