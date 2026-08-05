@@ -1,9 +1,9 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "version": "0.1.4",
+  "version": "0.1.6",
   "name": "eug-msv-claude-marketplace",
   "description": "Plugin marketplace for Claude Code from Eugene Moiseev",
-  "updated": "2026-07-31",
+  "updated": "2026-08-05",
   "owner": {
     "name": "Eugene Moiseev",
     "url": "https://github.com/EugeneMsv"
@@ -65,7 +65,7 @@
       "name": "plan-guard",
       "source": "./plugins/plan-guard",
       "description": "Plan Guard — enforces plan mode discipline, scores incoming prompt quality, syncs plans to projects, and cleans up old plan files",
-      "version": "0.2.2",
+      "version": "0.2.3",
       "author": {
         "name": "Eugene Moiseev"
       },
@@ -94,6 +94,23 @@
         "mr",
         "review",
         "diff"
+      ]
+    },
+    {
+      "name": "task-seeder",
+      "source": "./plugins/task-seeder",
+      "description": "Task Seeder — drafts a suggested Task N breakdown for multi-step prompts outside plan mode, as a non-binding starting point for TaskCreate",
+      "version": "0.1.1",
+      "author": {
+        "name": "Eugene Moiseev"
+      },
+      "category": "development",
+      "homepage": "https://github.com/EugeneMsv/claude-marketplace/tree/main/plugins/task-seeder",
+      "tags": [
+        "planning",
+        "tasks",
+        "drafting",
+        "productivity"
       ]
     }
   ]

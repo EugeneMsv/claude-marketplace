@@ -16,7 +16,8 @@ marketplace/
     ├── claude-code-guide/
     ├── code-sentinel/
     ├── feedback-loop/
-    └── plan-guard/
+    ├── plan-guard/
+    └── task-seeder/
 ```
 
 ## Available Plugins
@@ -80,6 +81,16 @@ Expert code review with layer-by-layer flow diagrams, model diff trees, and inte
 **Skills:** `code-review`, `mr-nitpick-sentinel`
 
 **[Full Documentation →](plugins/code-sentinel/README.md)**
+
+---
+
+### task-seeder
+
+Reminds the agent that a prompt covering more than one thing — especially anything needing exploration/research first — may be worth splitting into a `Task N: ...` breakdown via `TaskCreate`. Purely static (no model call, no heuristic gating); stays completely silent in plan mode, owned by `plan-guard`.
+
+**Hooks:** `task-breakdown-drafter` (UserPromptSubmit)
+
+**[Full Documentation →](plugins/task-seeder/README.md)**
 
 ## For Users
 

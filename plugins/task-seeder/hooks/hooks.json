@@ -1,0 +1,16 @@
+{
+  "description": "Task Seeder — drafts a suggested numbered task breakdown for multi-step prompts outside plan mode",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/task-seeder/task-breakdown-drafter.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
