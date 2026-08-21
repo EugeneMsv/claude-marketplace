@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""PermissionRequest hook (Bash) — one-sentence technical summary shown before the approval prompt.
+"""PreToolUse hook (Bash) — one-sentence technical summary shown before the command runs.
 
-PermissionRequest fires exactly when a tool call needs a permission decision —
-that IS the "about to ask" moment, so no permission_mode check is needed here
-(an earlier PreToolUse-based version tried to gate on permission_mode == "ask",
-which is not a real value; see https://code.claude.com/docs/en/hooks for the
-actual mode strings). A global try/except guarantees that on ANY failure
-(missing credentials, network error, malformed stdin) the hook emits `{}` —
-the Bash call must never be blocked or delayed by this hook failing.
+PreToolUse fires before every Bash call regardless of permission_mode, so no
+mode check is needed here (a PermissionRequest-based version was tried first,
+gated at various points on permission_mode; that value is never "ask" - see
+https://code.claude.com/docs/en/hooks for the real mode strings - and even
+after fixing the gate, PermissionRequest's firing depends on a real
+permission decision actually happening, which auto-approving/auto-denying
+sessions may skip entirely). The sole output is `systemMessage`; this hook
+never sets hookSpecificOutput.additionalContext or any permission decision -
+it only surfaces a note, it never gates or feeds Claude's own context. A
+global try/except guarantees that on ANY failure (missing credentials,
+network error, malformed stdin) the hook emits `{}` - the Bash call must
+never be blocked or delayed by this hook failing.
 """
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 # bash-brief
 
-Before Claude Code shows an approval prompt for a `Bash` call, adds a one-sentence, high-level technical description of what the command does — e.g. "Parses a JSON file to extract the response status field."
+Before a `Bash` call runs, adds a one-sentence, high-level technical description of what the command does — e.g. "Parses a JSON file to extract the response status field."
 
 ## What It Does
 
@@ -8,15 +8,16 @@ Before Claude Code shows an approval prompt for a `Bash` call, adds a one-senten
 
 | Hook | Event | Purpose |
 |---|---|---|
-| `bash-command-summarizer` | PermissionRequest (`Bash`) | Calls a Haiku-class model with the command text and asks for exactly one non-judgmental, high-level technical sentence describing what it does. Emits it as a `systemMessage` alongside the approval prompt. `PermissionRequest` fires exactly when a tool call needs a permission decision — that IS the "about to ask" moment — so it adds no latency or cost for calls that never need a decision (auto-accepted, bypassed, etc.). |
+| `bash-command-summarizer` | PreToolUse (`Bash`) | Calls a Haiku-class model with the command text and asks for exactly one non-judgmental, high-level technical sentence describing what it does. Emits it as a `systemMessage`. |
 
-### Why `PermissionRequest`, not `PreToolUse`
+### Why `PreToolUse`, and why it's the only field set
 
-An earlier version of this hook used `PreToolUse` gated on `permission_mode == "ask"`. That value doesn't exist — real `permission_mode` values are `default`, `plan`, `acceptEdits`, `auto`, `dontAsk`, `bypassPermissions` (see [Claude Code hooks docs](https://code.claude.com/docs/en/hooks)) — so the gate could never pass and the hook was a silent permanent no-op. `PermissionRequest` is the event purpose-built for this: it only fires when Claude Code is actually about to show the user a permission decision, and it carries the same `tool_name`/`tool_input` shape `PreToolUse` does.
+Two earlier designs were tried and dropped:
 
-## Design: Descriptive, Not Judgmental
+- A `PermissionRequest` hook gated on `permission_mode == "ask"`. That value doesn't exist — real `permission_mode` values are `default`, `plan`, `acceptEdits`, `auto`, `dontAsk`, `bypassPermissions` (see [Claude Code hooks docs](https://code.claude.com/docs/en/hooks)) — so the gate never passed.
+- After fixing that, a `PermissionRequest` hook emitting only `systemMessage`. `PermissionRequest` only fires when a real permission decision is actually needed, which auto-approving/auto-denying sessions can skip entirely — so it fired inconsistently depending on session permission mode.
 
-This hook never sets `hookSpecificOutput.permissionDecision` — it only adds a `systemMessage`. It does not approve, deny, or otherwise gate the command; that responsibility stays with Claude Code's normal permission flow and other hooks (e.g. scope-control hooks). Its only job is to make the pending command easier to read at a glance.
+`PreToolUse` fires before every Bash call regardless of permission mode, so it's the reliable choice. The hook sets `systemMessage` only — never `hookSpecificOutput.additionalContext` (which is delivered to Claude's own context as a system reminder, not to the user) and never any permission decision field. It does not approve, deny, or otherwise gate the command; that responsibility stays with Claude Code's normal permission flow and other hooks (e.g. scope-control hooks). Its only job is to make the pending command easier to read at a glance.
 
 ## Model Resolution
 

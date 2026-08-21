@@ -65,7 +65,7 @@ def _stub_anthropic_client(has_credentials, client_instance=None):
 def _bash_input(command, tool_name="Bash"):
     return json.dumps(
         {
-            "hook_event_name": "PermissionRequest",
+            "hook_event_name": "PreToolUse",
             "tool_name": tool_name,
             "tool_input": {"command": command},
         }
@@ -225,7 +225,7 @@ def test_main_happyPath_writesSystemMessageJsonToStdout(monkeypatch, capsys):
     stub_client = _StubClient(response_text=SAMPLE_SENTENCE)
     monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True, stub_client))
     hook_input = {
-        "hook_event_name": "PermissionRequest",
+        "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
         "tool_input": {"command": "cat response.json | jq '.status'"},
     }
@@ -238,7 +238,7 @@ def test_main_happyPath_writesSystemMessageJsonToStdout(monkeypatch, capsys):
 def test_main_toolNameNotBash_writesEmptyDict(monkeypatch, capsys):
     monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True))
     hook_input = {
-        "hook_event_name": "PermissionRequest",
+        "hook_event_name": "PreToolUse",
         "tool_name": "Read",
         "tool_input": {"file_path": "/tmp/foo"},
     }
