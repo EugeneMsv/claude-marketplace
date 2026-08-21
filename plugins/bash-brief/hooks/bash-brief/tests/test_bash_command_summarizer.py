@@ -62,11 +62,11 @@ def _stub_anthropic_client(has_credentials, client_instance=None):
     return Stub
 
 
-def _bash_input(command, permission_mode="ask", tool_name="Bash"):
+def _bash_input(command, tool_name="Bash"):
     return json.dumps(
         {
+            "hook_event_name": "PermissionRequest",
             "tool_name": tool_name,
-            "permission_mode": permission_mode,
             "tool_input": {"command": command},
         }
     )
@@ -75,24 +75,6 @@ def _bash_input(command, permission_mode="ask", tool_name="Bash"):
 def test_run_toolNameNotBash_returnsEmpty(monkeypatch):
     monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True))
     hook_input = _bash_input("ls -la", tool_name="Read")
-
-    result = summarizer.run(hook_input)
-
-    assert result == {}
-
-
-def test_run_permissionModeNotAsk_returnsEmpty(monkeypatch):
-    monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True))
-    hook_input = _bash_input("ls -la", permission_mode="allow")
-
-    result = summarizer.run(hook_input)
-
-    assert result == {}
-
-
-def test_run_missingPermissionMode_returnsEmpty(monkeypatch):
-    monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True))
-    hook_input = json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls -la"}})
 
     result = summarizer.run(hook_input)
 
@@ -158,15 +140,15 @@ def test_run_happyPath_writesAnnotatedDebugLogLine(monkeypatch):
     assert record["command"] == "cat response.json | jq '.status'"
 
 
-def test_run_permissionModeNotAsk_writesSkipDebugLogLine(monkeypatch):
+def test_run_toolNameNotBash_writesSkipDebugLogLine(monkeypatch):
     monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True))
-    hook_input = _bash_input("ls -la", permission_mode="allow")
+    hook_input = _bash_input("ls -la", tool_name="Read")
 
     summarizer.run(hook_input)
 
     record = json.loads(summarizer.DEBUG_LOG_PATH.read_text().strip())
-    assert record["decision"] == "skip_permission_mode_not_ask"
-    assert record["permission_mode"] == "allow"
+    assert record["decision"] == "skip_not_bash"
+    assert record["tool_name"] == "Read"
 
 
 def test_run_happyPath_sendsCommandInPrompt(monkeypatch):
@@ -243,8 +225,8 @@ def test_main_happyPath_writesSystemMessageJsonToStdout(monkeypatch, capsys):
     stub_client = _StubClient(response_text=SAMPLE_SENTENCE)
     monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True, stub_client))
     hook_input = {
+        "hook_event_name": "PermissionRequest",
         "tool_name": "Bash",
-        "permission_mode": "ask",
         "tool_input": {"command": "cat response.json | jq '.status'"},
     }
 
@@ -253,12 +235,12 @@ def test_main_happyPath_writesSystemMessageJsonToStdout(monkeypatch, capsys):
     assert result == {"systemMessage": f"[bash-brief] {SAMPLE_SENTENCE}"}
 
 
-def test_main_permissionModeAllow_writesEmptyDict(monkeypatch, capsys):
+def test_main_toolNameNotBash_writesEmptyDict(monkeypatch, capsys):
     monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True))
     hook_input = {
-        "tool_name": "Bash",
-        "permission_mode": "allow",
-        "tool_input": {"command": "ls -la"},
+        "hook_event_name": "PermissionRequest",
+        "tool_name": "Read",
+        "tool_input": {"file_path": "/tmp/foo"},
     }
 
     result = _run_main(hook_input, monkeypatch, capsys)

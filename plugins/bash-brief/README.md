@@ -8,7 +8,11 @@ Before Claude Code shows an approval prompt for a `Bash` call, adds a one-senten
 
 | Hook | Event | Purpose |
 |---|---|---|
-| `bash-command-summarizer` | PreToolUse (`Bash`) | Calls a Haiku-class model with the command text and asks for exactly one non-judgmental, high-level technical sentence describing what it does. Emits it as a `systemMessage` alongside the approval prompt. Fires only when `permission_mode == "ask"` — i.e. only when Claude Code is actually about to prompt for approval — so it adds no latency or cost when a command would run without a prompt anyway. |
+| `bash-command-summarizer` | PermissionRequest (`Bash`) | Calls a Haiku-class model with the command text and asks for exactly one non-judgmental, high-level technical sentence describing what it does. Emits it as a `systemMessage` alongside the approval prompt. `PermissionRequest` fires exactly when a tool call needs a permission decision — that IS the "about to ask" moment — so it adds no latency or cost for calls that never need a decision (auto-accepted, bypassed, etc.). |
+
+### Why `PermissionRequest`, not `PreToolUse`
+
+An earlier version of this hook used `PreToolUse` gated on `permission_mode == "ask"`. That value doesn't exist — real `permission_mode` values are `default`, `plan`, `acceptEdits`, `auto`, `dontAsk`, `bypassPermissions` (see [Claude Code hooks docs](https://code.claude.com/docs/en/hooks)) — so the gate could never pass and the hook was a silent permanent no-op. `PermissionRequest` is the event purpose-built for this: it only fires when Claude Code is actually about to show the user a permission decision, and it carries the same `tool_name`/`tool_input` shape `PreToolUse` does.
 
 ## Design: Descriptive, Not Judgmental
 

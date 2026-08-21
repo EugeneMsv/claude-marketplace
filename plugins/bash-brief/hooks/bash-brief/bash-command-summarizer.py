@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""PreToolUse hook (Bash) — one-sentence technical summary shown before the approval prompt.
+"""PermissionRequest hook (Bash) — one-sentence technical summary shown before the approval prompt.
 
-Fires only when Claude Code is actually about to ask for approval
-(permission_mode == "ask"); in any other mode this is a silent no-op so it never
-adds latency or API cost when a command would run without a prompt anyway. A
-global try/except guarantees that on ANY failure (missing credentials, network
-error, malformed stdin) the hook emits `{}` — the Bash call must never be
-blocked or delayed by this hook failing.
+PermissionRequest fires exactly when a tool call needs a permission decision —
+that IS the "about to ask" moment, so no permission_mode check is needed here
+(an earlier PreToolUse-based version tried to gate on permission_mode == "ask",
+which is not a real value; see https://code.claude.com/docs/en/hooks for the
+actual mode strings). A global try/except guarantees that on ANY failure
+(missing credentials, network error, malformed stdin) the hook emits `{}` —
+the Bash call must never be blocked or delayed by this hook failing.
 """
 from __future__ import annotations
 
@@ -111,15 +112,11 @@ def run(raw_input: str) -> dict:
         return {}
 
     tool_name = hook_input.get("tool_name")
-    permission_mode = hook_input.get("permission_mode")
     command = (hook_input.get("tool_input") or {}).get("command", "").strip()
-    base = {"tool_name": tool_name, "permission_mode": permission_mode, "command": command[:200]}
+    base = {"tool_name": tool_name, "command": command[:200]}
 
     if tool_name != "Bash":
         _debug_log({**base, "decision": "skip_not_bash"})
-        return {}
-    if permission_mode != "ask":
-        _debug_log({**base, "decision": "skip_permission_mode_not_ask"})
         return {}
     if not command:
         _debug_log({**base, "decision": "skip_empty_command"})
