@@ -1,6 +1,6 @@
 # bash-brief
 
-Before a `Bash` call runs, adds a one-sentence, high-level technical description of what the command does — e.g. `[bash-brief 14:32:07] Parses a JSON file to extract the response status field.`
+Before a `Bash` call runs, adds a one-sentence, high-level technical description of what the command does — e.g. `[bash-brief 14:32:07] Reads a local JSON file and extracts the response status field.`
 
 ## What It Does
 
@@ -22,7 +22,7 @@ Neither delivery path sets any permission decision field — this hook only surf
 
 ## tmux Setup (optional, but the only pre-approval-visible path)
 
-Requires running Claude Code inside tmux. tmux status-format rows never wrap, so the hook pre-splits the message at a word boundary (never mid-word) into `@bash_brief_note_1` / `@bash_brief_note_2` and drives two fixed status-bar rows:
+Requires running Claude Code inside tmux. tmux status-format rows never wrap, so the hook pre-splits the message at a word boundary (never mid-word) into `@bash_brief_note_1` / `@bash_brief_note_2` and drives two fixed status-bar rows. The split point is biased past the midpoint (`TMUX_NOTE_FIRST_LINE_RATIO`, default 0.58) so line 1 reads as the fuller line instead of looking clipped next to a longer line 2. Before calling the model, `compute_sentence_char_budget()` measures the pane's actual window width and tells the model the exact character limit to stay within — so the sentence is sized to fit the two rows instead of relying on tmux to truncate an overlong one mid-word.
 
 ```tmux
 set -g status 4   # bump if you already set a lower row count

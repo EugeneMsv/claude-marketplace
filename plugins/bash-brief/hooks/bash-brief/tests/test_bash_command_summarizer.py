@@ -26,11 +26,12 @@ def _load_hook_module():
 
 summarizer = _load_hook_module()
 
-# Captured before the autouse _stub_tmux_note/_fixed_now_stamp fixtures below
-# ever patch these module attributes, so tests of the real implementations
-# don't call the stubs instead.
+# Captured before the autouse _stub_tmux_note/_fixed_now_stamp/_stub_char_budget
+# fixtures below ever patch these module attributes, so tests of the real
+# implementations don't call the stubs instead.
 _REAL_SET_TMUX_WINDOW_NOTE = summarizer.set_tmux_window_note
 _REAL_NOW_STAMP = summarizer._now_stamp
+_REAL_COMPUTE_SENTENCE_CHAR_BUDGET = summarizer.compute_sentence_char_budget
 
 SAMPLE_SENTENCE = "Parses a JSON file to extract the response status field."
 
@@ -65,6 +66,14 @@ FIXED_COLOR = 111
 def _fixed_random_color(monkeypatch):
     """Freeze the tmux note's random color choice for deterministic assertions."""
     monkeypatch.setattr(summarizer.random, "choice", lambda seq: FIXED_COLOR)
+
+
+@pytest.fixture(autouse=True)
+def _stub_char_budget(monkeypatch):
+    """Prevent run()/main() tests from shelling out to real tmux for window width."""
+    mock = MagicMock(return_value=summarizer.DEFAULT_SENTENCE_BUDGET)
+    monkeypatch.setattr(summarizer, "compute_sentence_char_budget", mock)
+    return mock
 
 
 class _StubClient:
@@ -103,6 +112,16 @@ def _bash_input(command, tool_name="Bash"):
             "hook_event_name": "PermissionRequest",
             "tool_name": tool_name,
             "tool_input": {"command": command},
+        }
+    )
+
+
+def _mcp_input(tool_name, tool_input):
+    return json.dumps(
+        {
+            "hook_event_name": "PermissionRequest",
+            "tool_name": tool_name,
+            "tool_input": tool_input,
         }
     )
 
@@ -172,6 +191,18 @@ def test_run_happyPath_setsTmuxWindowNote(monkeypatch, _stub_tmux_note):
     _stub_tmux_note.assert_called_once_with(f"[bash-brief {FIXED_TIME}]", SAMPLE_SENTENCE)
 
 
+def test_run_mcpToolHappyPath_returnsSystemMessageAndSetsTmuxNote(monkeypatch, _stub_tmux_note):
+    stub_client = _StubClient(response_text=SAMPLE_SENTENCE)
+    monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+    hook_input = _mcp_input("mcp__trino__execute_query", {"query": "SELECT count(*) FROM orders LIMIT 10"})
+
+    result = summarizer.run(hook_input)
+
+    assert result == {"systemMessage": f"[bash-brief {FIXED_TIME}] {SAMPLE_SENTENCE}"}
+    assert "mcp__trino__execute_query" in stub_client.received["prompt"]
+    _stub_tmux_note.assert_called_once_with(f"[bash-brief {FIXED_TIME}]", SAMPLE_SENTENCE)
+
+
 def test_run_noCredentials_doesNotSetTmuxWindowNote(monkeypatch, _stub_tmux_note):
     monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(False))
     hook_input = _bash_input("cat response.json | jq '.status'")
@@ -192,10 +223,10 @@ def test_run_happyPath_writesAnnotatedDebugLogLine(monkeypatch):
     record = json.loads(summarizer.DEBUG_LOG_PATH.read_text().strip())
     assert record["decision"] == "annotated"
     assert record["sentence"] == SAMPLE_SENTENCE
-    assert record["command"] == "cat response.json | jq '.status'"
+    assert record["subject"] == "cat response.json | jq '.status'"
 
 
-def test_run_toolNameNotBash_writesSkipDebugLogLine(monkeypatch):
+def test_run_unsupportedTool_writesSkipDebugLogLine(monkeypatch):
     monkeypatch.setattr(summarizer, "DEBUG_LOG_ENABLED", True)
     monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True))
     hook_input = _bash_input("ls -la", tool_name="Read")
@@ -203,8 +234,21 @@ def test_run_toolNameNotBash_writesSkipDebugLogLine(monkeypatch):
     summarizer.run(hook_input)
 
     record = json.loads(summarizer.DEBUG_LOG_PATH.read_text().strip())
-    assert record["decision"] == "skip_not_bash"
+    assert record["decision"] == "skip_unsupported_tool"
     assert record["tool_name"] == "Read"
+
+
+def test_run_nonStringToolName_skipsUnsupportedToolWithoutRaising(monkeypatch):
+    monkeypatch.setattr(summarizer, "DEBUG_LOG_ENABLED", True)
+    monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True))
+    hook_input = json.dumps({"hook_event_name": "PermissionRequest", "tool_name": 123, "tool_input": {}})
+
+    result = summarizer.run(hook_input)
+
+    assert result == {}
+    record = json.loads(summarizer.DEBUG_LOG_PATH.read_text().strip())
+    assert record["decision"] == "skip_unsupported_tool"
+    assert record["tool_name"] == 123
 
 
 def test_run_debugLogDisabledByDefault_doesNotWriteLogFile(monkeypatch):
@@ -252,6 +296,99 @@ def test_resolveModel_envVarUnset_usesUndatedAlias():
     assert summarizer.resolve_model({}) == "claude-haiku-4-5"
 
 
+def test_computeSentenceCharBudget_noTmuxPane_returnsDefaultBudget():
+    assert _REAL_COMPUTE_SENTENCE_CHAR_BUDGET("[prefix]", env={}) == summarizer.DEFAULT_SENTENCE_BUDGET
+
+
+def test_computeSentenceCharBudget_withTmuxPane_computesFromWindowWidth(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args=args, returncode=0, stdout="100\n"),
+    )
+
+    budget = _REAL_COMPUTE_SENTENCE_CHAR_BUDGET("[prefix]", env={"TMUX_PANE": "%7"})
+
+    expected = (100 - summarizer.TMUX_ROW_PADDING) * 2 - len("[prefix]") - 1
+    assert budget == expected
+
+
+def test_computeSentenceCharBudget_tmuxFails_returnsDefaultBudget(monkeypatch):
+    def _fake_run(args, **kwargs):
+        raise subprocess.CalledProcessError(returncode=1, cmd=args)
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    budget = _REAL_COMPUTE_SENTENCE_CHAR_BUDGET("[prefix]", env={"TMUX_PANE": "%7"})
+
+    assert budget == summarizer.DEFAULT_SENTENCE_BUDGET
+
+
+def test_computeSentenceCharBudget_nonIntegerWidth_returnsDefaultBudget(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args=args, returncode=0, stdout="not-a-number\n"),
+    )
+
+    budget = _REAL_COMPUTE_SENTENCE_CHAR_BUDGET("[prefix]", env={"TMUX_PANE": "%7"})
+
+    assert budget == summarizer.DEFAULT_SENTENCE_BUDGET
+
+
+def test_computeSentenceCharBudget_tinyWindow_neverGoesBelowQuarterDefault(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args=args, returncode=0, stdout="5\n"),
+    )
+
+    budget = _REAL_COMPUTE_SENTENCE_CHAR_BUDGET("[a much longer prefix than the window]", env={"TMUX_PANE": "%7"})
+
+    assert budget == summarizer.DEFAULT_SENTENCE_BUDGET // 4
+
+
+def test_summarizeCommand_sendsCharLimitInPrompt():
+    stub_client = _StubClient(response_text=SAMPLE_SENTENCE)
+
+    summarizer.summarize_command(stub_client, "ls -la", 42)
+
+    assert "42" in stub_client.received["prompt"]
+
+
+def test_buildMcpSubject_emptyParams_rendersEmptyJsonObject():
+    subject = summarizer.build_mcp_subject("mcp__trino__list_catalogs", {})
+
+    assert subject == "MCP tool `mcp__trino__list_catalogs` invoked with parameters: {}"
+
+
+def test_buildMcpSubject_typicalParams_rendersToolNameAndJson():
+    tool_input = {"query": "SELECT count(*) FROM orders LIMIT 10", "catalog": "hive"}
+
+    subject = summarizer.build_mcp_subject("mcp__trino__execute_query", tool_input)
+
+    assert subject.startswith("MCP tool `mcp__trino__execute_query` invoked with parameters: ")
+    assert json.loads(subject.split("parameters: ", 1)[1]) == tool_input
+
+
+def test_buildMcpSubject_oversizedParams_truncatesToMaxChars():
+    tool_input = {"body": "x" * (summarizer.MAX_MCP_PARAMS_CHARS * 2)}
+
+    subject = summarizer.build_mcp_subject("mcp__slack__slack_send_message", tool_input)
+
+    params_text = subject.split("parameters: ", 1)[1]
+    assert len(params_text) == summarizer.MAX_MCP_PARAMS_CHARS
+
+
+def test_summarizeCommand_mcpSubjectWithBraces_doesNotRaiseAndIncludesSubject():
+    stub_client = _StubClient(response_text=SAMPLE_SENTENCE)
+    subject = summarizer.build_mcp_subject("mcp__trino__execute_query", {"query": "SELECT 1"})
+
+    summarizer.summarize_command(stub_client, subject, 100)
+
+    assert subject in stub_client.received["prompt"]
+
+
 @pytest.mark.parametrize(
     "raw, expected",
     [
@@ -263,25 +400,34 @@ def test_resolveModel_envVarUnset_usesUndatedAlias():
     ],
 )
 def test_cleanSentence_variousRawShapes_reducesToSingleCleanSentence(raw, expected):
-    assert summarizer.clean_sentence(raw) == expected
+    assert summarizer.clean_sentence(raw, summarizer.MAX_SENTENCE_CHARS) == expected
 
 
 def test_cleanSentence_emptyResponse_returnsEmptyString():
-    assert summarizer.clean_sentence("   \n  ") == ""
+    assert summarizer.clean_sentence("   \n  ", summarizer.MAX_SENTENCE_CHARS) == ""
 
 
 def test_cleanSentence_noTrailingPunctuation_appendsPeriod():
-    assert summarizer.clean_sentence("Lists files in the current directory") == (
-        "Lists files in the current directory."
-    )
+    assert summarizer.clean_sentence(
+        "Lists files in the current directory", summarizer.MAX_SENTENCE_CHARS
+    ) == ("Lists files in the current directory.")
 
 
 def test_cleanSentence_overLength_truncatesWithEllipsisWithinBound():
     long_sentence = "Runs a command that does something. " * 20
 
-    result = summarizer.clean_sentence(long_sentence)
+    result = summarizer.clean_sentence(long_sentence, summarizer.MAX_SENTENCE_CHARS)
 
     assert len(result) <= summarizer.MAX_SENTENCE_CHARS + 1
+    assert result.endswith("…")
+
+
+def test_cleanSentence_charLimitSmallerThanMax_truncatesToCharLimit():
+    long_sentence = "Runs a command that does something. " * 20
+
+    result = summarizer.clean_sentence(long_sentence, 40)
+
+    assert len(result) <= 41
     assert result.endswith("…")
 
 
@@ -428,3 +574,20 @@ def test_splitIntoTwoLines_longSentence_preservesAllWordsInOrder():
     assert line1
     assert line2
     assert (line1 + " " + line2).split() == text.split()
+
+
+def test_splitIntoTwoLines_defaultRatio_firstLineLongerThanSecond():
+    text = " ".join(["word"] * 10)
+
+    line1, line2 = summarizer.split_into_two_lines(text)
+
+    assert len(line1) > len(line2)
+
+
+def test_splitIntoTwoLines_customRatio_biasesTowardRequestedShare():
+    text = " ".join(["word"] * 10)
+
+    even_line1, _ = summarizer.split_into_two_lines(text, first_ratio=0.5)
+    biased_line1, _ = summarizer.split_into_two_lines(text, first_ratio=summarizer.TMUX_NOTE_FIRST_LINE_RATIO)
+
+    assert len(biased_line1) > len(even_line1)
