@@ -3,6 +3,7 @@
 import importlib.util
 import io
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -25,10 +26,11 @@ def _load_hook_module():
 
 summarizer = _load_hook_module()
 
-# Captured before the autouse _stub_tmux_note fixture below ever patches the
-# module attribute, so tests of set_tmux_window_note itself call the real
-# implementation instead of the stub.
+# Captured before the autouse _stub_tmux_note/_fixed_now_stamp fixtures below
+# ever patch these module attributes, so tests of the real implementations
+# don't call the stubs instead.
 _REAL_SET_TMUX_WINDOW_NOTE = summarizer.set_tmux_window_note
+_REAL_NOW_STAMP = summarizer._now_stamp
 
 SAMPLE_SENTENCE = "Parses a JSON file to extract the response status field."
 
@@ -45,6 +47,15 @@ def _stub_tmux_note(monkeypatch):
     mock = MagicMock()
     monkeypatch.setattr(summarizer, "set_tmux_window_note", mock)
     return mock
+
+
+FIXED_TIME = "13:45:07"
+
+
+@pytest.fixture(autouse=True)
+def _fixed_now_stamp(monkeypatch):
+    """Freeze the message timestamp so assertions can match an exact string."""
+    monkeypatch.setattr(summarizer, "_now_stamp", lambda: FIXED_TIME)
 
 
 class _StubClient:
@@ -139,7 +150,7 @@ def test_run_happyPath_returnsSystemMessageWithSentence(monkeypatch):
 
     result = summarizer.run(hook_input)
 
-    assert result == {"systemMessage": f"🔎 [bash-brief] {SAMPLE_SENTENCE}"}
+    assert result == {"systemMessage": f"[bash-brief {FIXED_TIME}] {SAMPLE_SENTENCE}"}
 
 
 def test_run_happyPath_setsTmuxWindowNote(monkeypatch, _stub_tmux_note):
@@ -149,7 +160,7 @@ def test_run_happyPath_setsTmuxWindowNote(monkeypatch, _stub_tmux_note):
 
     summarizer.run(hook_input)
 
-    _stub_tmux_note.assert_called_once_with(f"🔎 [bash-brief] {SAMPLE_SENTENCE}")
+    _stub_tmux_note.assert_called_once_with(f"[bash-brief {FIXED_TIME}] {SAMPLE_SENTENCE}")
 
 
 def test_run_noCredentials_doesNotSetTmuxWindowNote(monkeypatch, _stub_tmux_note):
@@ -211,6 +222,10 @@ def test_resolveModel_envVarSet_usesEnvValue():
     assert summarizer.resolve_model(env) == "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 
+def test_nowStamp_returns24HourTimeNoDate():
+    assert re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d:[0-5]\d", _REAL_NOW_STAMP())
+
+
 def test_resolveModel_envVarUnset_usesUndatedAlias():
     assert summarizer.resolve_model({}) == "claude-haiku-4-5"
 
@@ -266,7 +281,7 @@ def test_main_happyPath_writesSystemMessageJsonToStdout(monkeypatch, capsys):
 
     result = _run_main(hook_input, monkeypatch, capsys)
 
-    assert result == {"systemMessage": f"🔎 [bash-brief] {SAMPLE_SENTENCE}"}
+    assert result == {"systemMessage": f"[bash-brief {FIXED_TIME}] {SAMPLE_SENTENCE}"}
 
 
 def test_main_toolNameNotBash_writesEmptyDict(monkeypatch, capsys):

@@ -1,6 +1,6 @@
 # bash-brief
 
-Before a `Bash` call runs, adds a one-sentence, high-level technical description of what the command does — e.g. "Parses a JSON file to extract the response status field."
+Before a `Bash` call runs, adds a one-sentence, high-level technical description of what the command does — e.g. `[bash-brief 14:32:07] Parses a JSON file to extract the response status field.`
 
 ## What It Does
 
@@ -8,7 +8,7 @@ Before a `Bash` call runs, adds a one-sentence, high-level technical description
 
 | Hook | Event | Purpose |
 |---|---|---|
-| `bash-command-summarizer` | PermissionRequest (`Bash`) | Calls a Haiku-class model with the command text and asks for exactly one non-judgmental, high-level technical sentence describing what it does. Delivers it two ways: `systemMessage`, and (inside tmux) two window options read by your own `~/.tmux.conf`. |
+| `bash-command-summarizer` | PermissionRequest (`Bash`) | Calls a Haiku-class model with the command text and asks for exactly one non-judgmental, high-level technical sentence describing what it does. Prefixes it with `[bash-brief HH:MM:SS]` (24-hour local time, no date - the note is a running per-session log, see tmux Setup) and delivers it two ways: `systemMessage`, and (inside tmux) two window options read by your own `~/.tmux.conf`. |
 
 ### Why `PermissionRequest`, and why two delivery paths
 

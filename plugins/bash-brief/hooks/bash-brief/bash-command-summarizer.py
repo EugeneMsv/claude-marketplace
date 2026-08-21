@@ -113,6 +113,11 @@ def clean_sentence(raw: str) -> str:
     return sentence
 
 
+def _now_stamp() -> str:
+    """24-hour local time, no date - the message is a per-session running log."""
+    return datetime.now().strftime("%H:%M:%S")
+
+
 def split_into_two_lines(text: str) -> tuple[str, str]:
     """Split text into two roughly-equal halves at the nearest space to the midpoint.
 
@@ -222,7 +227,7 @@ def run(raw_input: str) -> dict:
         return {}
 
     _debug_log({**base, "decision": "annotated", "sentence": sentence})
-    message = f"🔎 [bash-brief] {sentence}"
+    message = f"[bash-brief {_now_stamp()}] {sentence}"
     set_tmux_window_note(message)
     return {"systemMessage": message}
 
