@@ -1,24 +1,40 @@
 #!/usr/bin/env python3
-"""PreToolUse hook (Bash) — one-sentence technical summary shown before the command runs.
+"""PermissionRequest hook (Bash) — one-sentence technical summary of the pending command.
 
-PreToolUse fires before every Bash call regardless of permission_mode, so no
-mode check is needed here (a PermissionRequest-based version was tried first,
-gated at various points on permission_mode; that value is never "ask" - see
-https://code.claude.com/docs/en/hooks for the real mode strings - and even
-after fixing the gate, PermissionRequest's firing depends on a real
-permission decision actually happening, which auto-approving/auto-denying
-sessions may skip entirely). The sole output is `systemMessage`; this hook
-never sets hookSpecificOutput.additionalContext or any permission decision -
-it only surfaces a note, it never gates or feeds Claude's own context. A
-global try/except guarantees that on ANY failure (missing credentials,
-network error, malformed stdin) the hook emits `{}` - the Bash call must
-never be blocked or delayed by this hook failing.
+PermissionRequest fires only when a real permission decision is actually
+needed - that's the exact moment this hook is meant to annotate, so no
+permission_mode check is needed. This means it can skip entirely in
+auto-approving/auto-denying sessions (a PreToolUse-based version was tried
+for firing reliability instead, but PreToolUse fires before EVERY Bash call
+regardless of whether a decision is even needed, which is broader than what
+this hook is meant to describe).
+
+Two delivery paths, since neither alone is reliable everywhere:
+- `systemMessage`: the documented field, but confirmed (this session) to only
+  render attached to the tool call's completed transcript entry - i.e. AFTER
+  approval, never before or during the decision.
+- A tmux window option (`@bash_brief_note`, read by a `status-format` row in
+  the user's own ~/.tmux.conf - see README): confirmed to render immediately
+  when the hook runs, before AND independent of the approval decision,
+  because it's tmux's own status-bar chrome, not something Claude Code
+  renders at all. Requires `$TMUX_PANE` to be set (running inside tmux) and
+  the user's tmux.conf to have the matching status-format row; silently
+  skipped otherwise. Never cleared once set (see README) - PostToolUse only
+  fires on the allow-and-succeeded branch, never on a manual deny, so partial
+  clearing would be inconsistent; it's left as a running last-command log.
+
+Neither delivery sets hookSpecificOutput.additionalContext or any permission
+decision - this hook only surfaces a note, it never gates or feeds Claude's
+own context. A global try/except guarantees that on ANY failure (missing
+credentials, network error, malformed stdin) the hook emits `{}` - the Bash
+call must never be blocked or delayed by this hook failing.
 """
 from __future__ import annotations
 
 import json
 import os
 import re
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -97,6 +113,69 @@ def clean_sentence(raw: str) -> str:
     return sentence
 
 
+def split_into_two_lines(text: str) -> tuple[str, str]:
+    """Split text into two roughly-equal halves at the nearest space to the midpoint.
+
+    tmux status-format rows never wrap - each is exactly one physical line -
+    so a fixed two-row layout needs the text pre-split, not relying on tmux
+    to do it. Only ever splits at a space - never mid-word - so if there is
+    no space anywhere in the text, everything stays on the first line and the
+    second is empty rather than cutting a word in half.
+    """
+    if not text:
+        return "", ""
+    midpoint = len(text) // 2
+    left = text.rfind(" ", 0, midpoint + 1)
+    right = text.find(" ", midpoint)
+    if left == -1 and right == -1:
+        return text, ""
+    elif left == -1:
+        split_at = right
+    elif right == -1:
+        split_at = left
+    else:
+        split_at = left if (midpoint - left) <= (right - midpoint) else right
+    return text[:split_at].rstrip(), text[split_at:].lstrip()
+
+
+def set_tmux_window_note(text: str, env=None) -> None:
+    """Write `text`, split across two lines, into this session's own tmux window
+    options @bash_brief_note_1 / @bash_brief_note_2.
+
+    Requires $TMUX_PANE (set only when actually running inside tmux) and reads
+    it fresh via `tmux display-message` rather than trusting a cached window
+    id, since the pane can move between windows. Best-effort, never raises -
+    a missing tmux binary, a pane outside tmux, or any subprocess failure just
+    means the note isn't written.
+    """
+    env = env if env is not None else os.environ
+    pane = env.get("TMUX_PANE")
+    if not pane:
+        return
+    line1, line2 = split_into_two_lines(text)
+    try:
+        window = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", pane, "#{window_id}"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=True,
+        ).stdout.strip()
+        if window:
+            subprocess.run(
+                ["tmux", "set-option", "-w", "-t", window, "@bash_brief_note_1", line1],
+                timeout=3,
+                check=False,
+            )
+            subprocess.run(
+                ["tmux", "set-option", "-w", "-t", window, "@bash_brief_note_2", line2],
+                timeout=3,
+                check=False,
+            )
+    except (subprocess.SubprocessError, OSError):
+        pass
+
+
 def _debug_log(record: dict) -> None:
     """Append one JSONL line; best-effort, swallows I/O errors."""
     try:
@@ -143,7 +222,9 @@ def run(raw_input: str) -> dict:
         return {}
 
     _debug_log({**base, "decision": "annotated", "sentence": sentence})
-    return {"systemMessage": f"[bash-brief] {sentence}"}
+    message = f"🔎 [bash-brief] {sentence}"
+    set_tmux_window_note(message)
+    return {"systemMessage": message}
 
 
 def main() -> None:

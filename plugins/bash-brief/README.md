@@ -8,16 +8,31 @@ Before a `Bash` call runs, adds a one-sentence, high-level technical description
 
 | Hook | Event | Purpose |
 |---|---|---|
-| `bash-command-summarizer` | PreToolUse (`Bash`) | Calls a Haiku-class model with the command text and asks for exactly one non-judgmental, high-level technical sentence describing what it does. Emits it as a `systemMessage`. |
+| `bash-command-summarizer` | PermissionRequest (`Bash`) | Calls a Haiku-class model with the command text and asks for exactly one non-judgmental, high-level technical sentence describing what it does. Delivers it two ways: `systemMessage`, and (inside tmux) two window options read by your own `~/.tmux.conf`. |
 
-### Why `PreToolUse`, and why it's the only field set
+### Why `PermissionRequest`, and why two delivery paths
 
-Two earlier designs were tried and dropped:
+An earlier version used `PreToolUse` for firing reliability (it fires before every Bash call regardless of permission mode). But `PreToolUse` fires far more broadly than what this hook is meant to describe — every Bash call, including ones that will never show any decision at all. `PermissionRequest` fires only when a real permission decision is actually needed, which is the exact moment this hook exists to annotate; a first attempt at it was gated on `permission_mode == "ask"`, a value that doesn't exist (real values are `default`, `plan`, `acceptEdits`, `auto`, `dontAsk`, `bypassPermissions` — see [Claude Code hooks docs](https://code.claude.com/docs/en/hooks)), fixed by dropping the gate entirely. The tradeoff: in an auto-approving/auto-denying session, `PermissionRequest` — and this hook — may not fire at all, since no real decision was needed.
 
-- A `PermissionRequest` hook gated on `permission_mode == "ask"`. That value doesn't exist — real `permission_mode` values are `default`, `plan`, `acceptEdits`, `auto`, `dontAsk`, `bypassPermissions` (see [Claude Code hooks docs](https://code.claude.com/docs/en/hooks)) — so the gate never passed.
-- After fixing that, a `PermissionRequest` hook emitting only `systemMessage`. `PermissionRequest` only fires when a real permission decision is actually needed, which auto-approving/auto-denying sessions can skip entirely — so it fired inconsistently depending on session permission mode.
+`systemMessage` itself was empirically confirmed (verified via a fixed dummy hook with zero other variables) to render only attached to the tool call's *completed* transcript entry — i.e. after you've already approved, never before or during the decision. There is no hook-level mechanism that reliably shows text before the decision: `hookSpecificOutput.additionalContext` is delivered to Claude's own context (a system reminder), not the user; `permissionDecisionReason` on an `"ask"` decision is documented to show pre-approval but is a currently-open, acknowledged Claude Code bug ([#17356](https://github.com/anthropics/claude-code/issues/17356)); the status line explicitly hides during permission prompts.
 
-`PreToolUse` fires before every Bash call regardless of permission mode, so it's the reliable choice. The hook sets `systemMessage` only — never `hookSpecificOutput.additionalContext` (which is delivered to Claude's own context as a system reminder, not to the user) and never any permission decision field. It does not approve, deny, or otherwise gate the command; that responsibility stays with Claude Code's normal permission flow and other hooks (e.g. scope-control hooks). Its only job is to make the pending command easier to read at a glance.
+The one channel that *does* show up before/independent of the decision: a **tmux window option**, set directly via the `tmux` CLI talking to the tmux server's control socket (the same mechanism your own `~/.claude/tmux/tmux-claude-alert.sh` already uses for `@claude_alert`). It's tmux's own status-bar chrome, not anything Claude Code renders, so none of the above gating applies. See **tmux Setup** below.
+
+Neither delivery path sets any permission decision field — this hook only surfaces a note, it never approves, denies, or otherwise gates the command; that responsibility stays with Claude Code's normal permission flow and other hooks (e.g. scope-control hooks).
+
+## tmux Setup (optional, but the only pre-approval-visible path)
+
+Requires running Claude Code inside tmux. tmux status-format rows never wrap, so the hook pre-splits the message at a word boundary (never mid-word) into `@bash_brief_note_1` / `@bash_brief_note_2` and drives two fixed status-bar rows:
+
+```tmux
+set -g status 4   # bump if you already set a lower row count
+set -g status-format[2] '#[align=left,bg=colour236,fg=colour223] #{@bash_brief_note_1} '
+set -g status-format[3] '#[align=left,bg=colour236,fg=colour223] #{@bash_brief_note_2} '
+```
+
+Then `tmux source-file ~/.tmux.conf` (or restart tmux) to apply it. Once set, the note is **never cleared automatically** — there is no hook event that reliably fires "after the human's decision" regardless of outcome (`PostToolUse` only fires on the allow-and-succeeded branch, never on a manual deny), so attempting partial cleanup would be inconsistent. The rows are a running log of the last Bash command's description, not a per-command popup.
+
+Without tmux, or without this config, `bash-command-summarizer.py` silently skips the tmux write (checks `$TMUX_PANE`) and falls back to `systemMessage` only.
 
 ## Model Resolution
 

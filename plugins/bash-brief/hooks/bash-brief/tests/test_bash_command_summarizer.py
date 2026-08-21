@@ -3,8 +3,10 @@
 import importlib.util
 import io
 import json
+import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -23,6 +25,11 @@ def _load_hook_module():
 
 summarizer = _load_hook_module()
 
+# Captured before the autouse _stub_tmux_note fixture below ever patches the
+# module attribute, so tests of set_tmux_window_note itself call the real
+# implementation instead of the stub.
+_REAL_SET_TMUX_WINDOW_NOTE = summarizer.set_tmux_window_note
+
 SAMPLE_SENTENCE = "Parses a JSON file to extract the response status field."
 
 
@@ -30,6 +37,14 @@ SAMPLE_SENTENCE = "Parses a JSON file to extract the response status field."
 def _redirect_debug_log(monkeypatch, tmp_path):
     """Keep debug-log writes inside tmp_path instead of the real ~/.claude dir."""
     monkeypatch.setattr(summarizer, "DEBUG_LOG_PATH", tmp_path / "debug.jsonl")
+
+
+@pytest.fixture(autouse=True)
+def _stub_tmux_note(monkeypatch):
+    """Prevent run()/main() tests from shelling out to real tmux; spy for assertions."""
+    mock = MagicMock()
+    monkeypatch.setattr(summarizer, "set_tmux_window_note", mock)
+    return mock
 
 
 class _StubClient:
@@ -65,7 +80,7 @@ def _stub_anthropic_client(has_credentials, client_instance=None):
 def _bash_input(command, tool_name="Bash"):
     return json.dumps(
         {
-            "hook_event_name": "PreToolUse",
+            "hook_event_name": "PermissionRequest",
             "tool_name": tool_name,
             "tool_input": {"command": command},
         }
@@ -124,7 +139,26 @@ def test_run_happyPath_returnsSystemMessageWithSentence(monkeypatch):
 
     result = summarizer.run(hook_input)
 
-    assert result == {"systemMessage": f"[bash-brief] {SAMPLE_SENTENCE}"}
+    assert result == {"systemMessage": f"🔎 [bash-brief] {SAMPLE_SENTENCE}"}
+
+
+def test_run_happyPath_setsTmuxWindowNote(monkeypatch, _stub_tmux_note):
+    stub_client = _StubClient(response_text=SAMPLE_SENTENCE)
+    monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+    hook_input = _bash_input("cat response.json | jq '.status'")
+
+    summarizer.run(hook_input)
+
+    _stub_tmux_note.assert_called_once_with(f"🔎 [bash-brief] {SAMPLE_SENTENCE}")
+
+
+def test_run_noCredentials_doesNotSetTmuxWindowNote(monkeypatch, _stub_tmux_note):
+    monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(False))
+    hook_input = _bash_input("cat response.json | jq '.status'")
+
+    summarizer.run(hook_input)
+
+    _stub_tmux_note.assert_not_called()
 
 
 def test_run_happyPath_writesAnnotatedDebugLogLine(monkeypatch):
@@ -225,20 +259,20 @@ def test_main_happyPath_writesSystemMessageJsonToStdout(monkeypatch, capsys):
     stub_client = _StubClient(response_text=SAMPLE_SENTENCE)
     monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True, stub_client))
     hook_input = {
-        "hook_event_name": "PreToolUse",
+        "hook_event_name": "PermissionRequest",
         "tool_name": "Bash",
         "tool_input": {"command": "cat response.json | jq '.status'"},
     }
 
     result = _run_main(hook_input, monkeypatch, capsys)
 
-    assert result == {"systemMessage": f"[bash-brief] {SAMPLE_SENTENCE}"}
+    assert result == {"systemMessage": f"🔎 [bash-brief] {SAMPLE_SENTENCE}"}
 
 
 def test_main_toolNameNotBash_writesEmptyDict(monkeypatch, capsys):
     monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True))
     hook_input = {
-        "hook_event_name": "PreToolUse",
+        "hook_event_name": "PermissionRequest",
         "tool_name": "Read",
         "tool_input": {"file_path": "/tmp/foo"},
     }
@@ -246,3 +280,84 @@ def test_main_toolNameNotBash_writesEmptyDict(monkeypatch, capsys):
     result = _run_main(hook_input, monkeypatch, capsys)
 
     assert result == {}
+
+
+def test_setTmuxWindowNote_noTmuxPane_doesNotCallSubprocess(monkeypatch):
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("subprocess.run should not be called without $TMUX_PANE")
+
+    monkeypatch.setattr(subprocess, "run", _fail_if_called)
+
+    _REAL_SET_TMUX_WINDOW_NOTE("🔎 test note", env={})
+
+
+def test_setTmuxWindowNote_withTmuxPane_resolvesWindowThenSetsBothLineOptions(monkeypatch):
+    calls = []
+
+    def _fake_run(args, **kwargs):
+        calls.append(args)
+        if args[:2] == ["tmux", "display-message"]:
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="@3\n")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    _REAL_SET_TMUX_WINDOW_NOTE("left right", env={"TMUX_PANE": "%7"})
+
+    assert calls[0] == ["tmux", "display-message", "-p", "-t", "%7", "#{window_id}"]
+    assert calls[1] == ["tmux", "set-option", "-w", "-t", "@3", "@bash_brief_note_1", "left"]
+    assert calls[2] == ["tmux", "set-option", "-w", "-t", "@3", "@bash_brief_note_2", "right"]
+
+
+def test_setTmuxWindowNote_emptyWindowId_doesNotCallSetOption(monkeypatch):
+    calls = []
+
+    def _fake_run(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="   \n")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    _REAL_SET_TMUX_WINDOW_NOTE("left right", env={"TMUX_PANE": "%7"})
+
+    assert len(calls) == 1
+
+
+def test_setTmuxWindowNote_displayMessageFails_doesNotRaise(monkeypatch):
+    def _fake_run(args, **kwargs):
+        raise subprocess.CalledProcessError(returncode=1, cmd=args)
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    _REAL_SET_TMUX_WINDOW_NOTE("left right", env={"TMUX_PANE": "%7"})
+
+
+def test_setTmuxWindowNote_tmuxBinaryMissing_doesNotRaise(monkeypatch):
+    def _fake_run(args, **kwargs):
+        raise FileNotFoundError("tmux not found")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    _REAL_SET_TMUX_WINDOW_NOTE("left right", env={"TMUX_PANE": "%7"})
+
+
+def test_splitIntoTwoLines_emptyString_returnsTwoEmptyStrings():
+    assert summarizer.split_into_two_lines("") == ("", "")
+
+
+def test_splitIntoTwoLines_twoWords_splitsAtTheSpace():
+    assert summarizer.split_into_two_lines("left right") == ("left", "right")
+
+
+def test_splitIntoTwoLines_noSpaces_keepsWholeWordOnFirstLine():
+    assert summarizer.split_into_two_lines("abcdefgh") == ("abcdefgh", "")
+
+
+def test_splitIntoTwoLines_longSentence_preservesAllWordsInOrder():
+    text = "🔎 [bash-brief] Executes a Python one-liner that prints a debug message."
+
+    line1, line2 = summarizer.split_into_two_lines(text)
+
+    assert line1
+    assert line2
+    assert (line1 + " " + line2).split() == text.split()
