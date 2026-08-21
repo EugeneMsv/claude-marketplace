@@ -1,6 +1,6 @@
 # bash-brief
 
-Before a `Bash` call runs, adds a one-sentence, high-level technical description of what the command does — e.g. `[bash-brief 14:32:07] Reads a local JSON file and extracts the response status field.`
+Before a `Bash` call or an MCP tool call runs, adds a one-sentence, high-level technical description of what it does — e.g. `[bash-brief 14:32:07] Reads a local JSON file and extracts the response status field.`
 
 ## What It Does
 
@@ -8,7 +8,7 @@ Before a `Bash` call runs, adds a one-sentence, high-level technical description
 
 | Hook | Event | Purpose |
 |---|---|---|
-| `bash-command-summarizer` | PermissionRequest (`Bash`) | Calls a Haiku-class model with the command text and asks for exactly one non-judgmental, high-level technical sentence describing what it does. Prefixes it with `[bash-brief HH:MM:SS]` (24-hour local time, no date - the note is a running per-session log, see tmux Setup) and delivers it two ways: `systemMessage`, and (inside tmux) two window options read by your own `~/.tmux.conf`. |
+| `bash-command-summarizer` | PermissionRequest (`Bash\|mcp__.*`) | Calls a Haiku-class model with the command text (or, for an MCP tool call, the tool name and its JSON parameters — see **MCP Tool Support** below) and asks for exactly one non-judgmental, high-level technical sentence describing what it does. Prefixes it with `[bash-brief HH:MM:SS]` (24-hour local time, no date - the note is a running per-session log, see tmux Setup) and delivers it two ways: `systemMessage`, and (inside tmux) two window options read by your own `~/.tmux.conf`. |
 
 ### Why `PermissionRequest`, and why two delivery paths
 
@@ -19,6 +19,12 @@ An earlier version used `PreToolUse` for firing reliability (it fires before eve
 The one channel that *does* show up before/independent of the decision: a **tmux window option**, set directly via the `tmux` CLI talking to the tmux server's control socket (the same mechanism your own `~/.claude/tmux/tmux-claude-alert.sh` already uses for `@claude_alert`). It's tmux's own status-bar chrome, not anything Claude Code renders, so none of the above gating applies. See **tmux Setup** below.
 
 Neither delivery path sets any permission decision field — this hook only surfaces a note, it never approves, denies, or otherwise gates the command; that responsibility stays with Claude Code's normal permission flow and other hooks (e.g. scope-control hooks).
+
+## MCP Tool Support
+
+The matcher is blanket (`mcp__.*`, an unanchored regex per Claude Code's hooks docs) — it fires for *any* MCP tool call that reaches a real permission decision, not an allow-list of specific servers/tools. For an MCP call, `build_mcp_subject()` renders the model's input as `` MCP tool `mcp__<server>__<tool>` invoked with parameters: <json> ``, where `<json>` is the tool's `tool_input` dumped verbatim (truncated to `MAX_MCP_PARAMS_CHARS`, 2000 chars) — MCP parameters can be arbitrarily large/free-form (SQL text, file contents, whole JSON blobs), unlike a Bash command string.
+
+**Caveat:** those parameters are sent to the Haiku model as-is (subject to the truncation above). If an MCP tool's arguments include file paths, query text, or other sensitive values, that content leaves your machine the same way a Bash command's text already does today — this hook doesn't redact or filter tool parameters.
 
 ## tmux Setup (optional, but the only pre-approval-visible path)
 

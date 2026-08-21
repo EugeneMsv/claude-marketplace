@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PermissionRequest hook (Bash) — one-sentence technical summary of the pending command.
+"""PermissionRequest hook (Bash + MCP tools) — one-sentence technical summary of the pending invocation.
 
 PermissionRequest fires only when a real permission decision is actually
 needed - that's the exact moment this hook is meant to annotate, so no
@@ -7,7 +7,9 @@ permission_mode check is needed. This means it can skip entirely in
 auto-approving/auto-denying sessions (a PreToolUse-based version was tried
 for firing reliability instead, but PreToolUse fires before EVERY Bash call
 regardless of whether a decision is even needed, which is broader than what
-this hook is meant to describe).
+this hook is meant to describe). The matcher (`Bash|mcp__.*`) covers both
+Bash commands and any MCP tool call - see build_mcp_subject() for how an
+MCP invocation's tool name and JSON parameters get rendered for the model.
 
 Two delivery paths, since neither alone is reliable everywhere:
 - `systemMessage`: the documented field, but confirmed (this session) to only
