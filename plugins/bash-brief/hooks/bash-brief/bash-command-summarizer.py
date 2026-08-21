@@ -119,6 +119,14 @@ Rules:
 - Name the source's origin explicitly (local file, network, stdin, etc.).
 - State filter/match criteria concretely (exact counts or named targets), not vaguely.
 - Name actual output fields or content when identifiable, not generic terms like "results".
+- For an MCP tool call, the tool name alone is rarely the interesting part — dig into the \
+parameters for the specific domain detail and name it, not just the tool/server:
+  - SQL/query-language parameter: name the table(s)/dataset queried and the key filter, \
+grouping, or join conditions, not just "runs a query".
+  - Metric or time-range parameter (observability/monitoring tools): name the specific \
+metric and the time window, not just "queries metrics".
+  - Document/page/ticket/resource-identifier parameter (wiki, tracker, knowledge-base \
+tools): name that resource specifically by its ID, title, or path, not just "fetches a page".
 - The full sentence must fit within {char_limit} characters — count carefully and stay \
 at or under this limit, even if it means dropping detail.
 - Do not judge or mention safety, risk, or whether to approve — a separate system \
@@ -133,8 +141,18 @@ Example output: Reads a local JSON discussion file, matches entries against two 
 line-number targets, and prints each match's comment body.
 
 Example command: MCP tool `mcp__trino__execute_query` invoked with parameters: \
-{{"query": "SELECT count(*) FROM orders LIMIT 10"}}
-Example output: Runs a Trino SQL query via MCP to count rows in the orders table, limited to 10.
+{{"query": "SELECT status, count(*) FROM orders WHERE created_at > '2026-01-01' GROUP BY status LIMIT 20"}}
+Example output: Runs a Trino SQL query via MCP counting orders by status for orders \
+created after 2026-01-01, limited to 20 rows.
+
+Example command: MCP tool `mcp__grafana__query_metrics` invoked with parameters: \
+{{"metric": "cpu_usage_percent", "service": "api-gateway", "from": "now-1h", "to": "now"}}
+Example output: Queries the api-gateway service's cpu_usage_percent metric via Grafana \
+MCP for the last hour.
+
+Example command: MCP tool `mcp__atlassian__getConfluencePage` invoked with parameters: \
+{{"pageId": "123456", "cloudId": "example.atlassian.net"}}
+Example output: Fetches Confluence page 123456 via MCP from the example.atlassian.net site.
 
 Input:
 {command}

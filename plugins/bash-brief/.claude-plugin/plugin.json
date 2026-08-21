@@ -1,5 +1,5 @@
 {
   "name": "bash-brief",
-  "version": "0.1.11",
+  "version": "0.1.13",
   "description": "Bash Brief — before every Bash or MCP tool approval prompt, adds a one-sentence, high-level technical description of what it does"
 }

@@ -24,6 +24,8 @@ Neither delivery path sets any permission decision field — this hook only surf
 
 The matcher is blanket (`mcp__.*`, an unanchored regex per Claude Code's hooks docs) — it fires for *any* MCP tool call that reaches a real permission decision, not an allow-list of specific servers/tools. For an MCP call, `build_mcp_subject()` renders the model's input as `` MCP tool `mcp__<server>__<tool>` invoked with parameters: <json> ``, where `<json>` is the tool's `tool_input` dumped verbatim (truncated to `MAX_MCP_PARAMS_CHARS`, 2000 chars) — MCP parameters can be arbitrarily large/free-form (SQL text, file contents, whole JSON blobs), unlike a Bash command string.
 
+The tool name alone rarely says what actually matters, so `PROMPT_TEMPLATE` explicitly tells the model to dig into the parameters for domain-specific detail instead of just naming the tool/server — a SQL/query-language parameter gets the table(s) and filter/grouping conditions named, a metric/time-range parameter (observability tools) gets the specific metric and time window named, and a document/page/ticket identifier (wiki/tracker tools) gets that resource named by ID, title, or path. Three few-shot examples (Trino, Grafana-shaped metrics, Confluence) demonstrate the pattern; it generalizes to any MCP server whose params happen to look like one of those shapes, without any per-server code.
+
 **Caveat:** those parameters are sent to the Haiku model as-is (subject to the truncation above). If an MCP tool's arguments include file paths, query text, or other sensitive values, that content leaves your machine the same way a Bash command's text already does today — this hook doesn't redact or filter tool parameters.
 
 ## tmux Setup (optional, but the only pre-approval-visible path)

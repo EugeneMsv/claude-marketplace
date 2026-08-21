@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "version": "0.1.20",
+  "version": "0.1.22",
   "name": "eug-msv-claude-marketplace",
   "description": "Plugin marketplace for Claude Code from Eugene Moiseev",
   "updated": "2026-08-21",
@@ -118,7 +118,7 @@
       "name": "bash-brief",
       "source": "./plugins/bash-brief",
       "description": "Bash Brief — before every Bash or MCP tool approval prompt, adds a one-sentence, high-level technical description of what it does",
-      "version": "0.1.11",
+      "version": "0.1.13",
       "author": {
         "name": "Eugene Moiseev"
       },
