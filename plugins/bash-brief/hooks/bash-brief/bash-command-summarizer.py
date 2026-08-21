@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
 import subprocess
 import sys
@@ -41,11 +42,30 @@ from pathlib import Path
 
 from anthropic_client import AnthropicClient
 
-# Always-on JSONL trail of every decision this hook makes (fired, skipped and
-# why, or errored) — mirrors grep-token-killer's audit log. Lets you confirm
-# the hook is actually firing without needing a debugger on a subprocess
-# Claude Code spawns per Bash call.
+# JSONL trail of every decision this hook makes (fired, skipped and why, or
+# errored) — mirrors grep-token-killer's audit log. Lets you confirm the hook
+# is actually firing without needing a debugger on a subprocess Claude Code
+# spawns per Bash call. Off by default (flip to True to debug firing issues).
+DEBUG_LOG_ENABLED = False
 DEBUG_LOG_PATH = Path.home() / ".claude" / "bash-brief" / "debug.jsonl"
+
+# tmux 256-color palette for the window note - picked for readability against
+# a dark status-bar background (colour236), spanning the hue wheel so a fresh
+# random pick each time is visually obvious, not just a subtle shade change.
+TMUX_NOTE_COLORS = (
+    196, 202, 208, 214, 220, 226, 190, 154, 118, 82,
+    46, 47, 48, 49, 50, 51, 45, 39, 33, 27,
+    63, 99, 135, 165, 201, 207, 213, 219, 178, 172,
+)
+
+# Must match the fg= color the README's status-format[2]/[3] rows declare.
+# tmux style codes have no "revert to previous style" - #[fg=X] just stays in
+# effect until the next #[...], so after the randomly-colored prefix we must
+# explicitly restate the row's own base color, not "default", or the tail of
+# a sentence that spans onto line 2 (whose row re-declares this color itself)
+# visibly mismatches the portion left on line 1. Keep this in sync if you
+# change the row color in your own ~/.tmux.conf.
+TMUX_NOTE_BASE_COLOR = 223
 
 # Undated alias — the Claude API's own convenience pointer to the latest Haiku
 # 4.5 snapshot. ANTHROPIC_DEFAULT_HAIKU_MODEL is Claude Code's own documented
@@ -143,9 +163,22 @@ def split_into_two_lines(text: str) -> tuple[str, str]:
     return text[:split_at].rstrip(), text[split_at:].lstrip()
 
 
-def set_tmux_window_note(text: str, env=None) -> None:
-    """Write `text`, split across two lines, into this session's own tmux window
-    options @bash_brief_note_1 / @bash_brief_note_2.
+def set_tmux_window_note(prefix: str, sentence: str, env=None) -> None:
+    """Write `prefix` + `sentence`, split across two lines, into this session's
+    own tmux window options @bash_brief_note_1 / @bash_brief_note_2.
+
+    Only `prefix` (the "[bash-brief HH:MM:SS]" tag) gets a freshly random
+    color from TMUX_NOTE_COLORS each call, embedded as a tmux `#[fg=colourN]`
+    style code directly in the option value, then reset to TMUX_NOTE_BASE_COLOR
+    (matching the row's own base color, NOT tmux's "default") right after it -
+    tmux style codes have no "revert to previous style"; resetting to
+    "default" instead of the row's actual color visibly mismatched a sentence
+    that spans onto line 2, since line 2's own row re-declares the base color
+    itself. tmux parses style codes in a status-format string after
+    substituting `#{@var}`, so this recolors just the tag on every update
+    without touching ~/.tmux.conf or recoloring the sentence itself. The point
+    is to draw the eye to the tag: a message that always looked the same
+    would blend into a status bar you've stopped consciously reading.
 
     Requires $TMUX_PANE (set only when actually running inside tmux) and reads
     it fresh via `tmux display-message` rather than trusting a cached window
@@ -157,7 +190,9 @@ def set_tmux_window_note(text: str, env=None) -> None:
     pane = env.get("TMUX_PANE")
     if not pane:
         return
-    line1, line2 = split_into_two_lines(text)
+    color = random.choice(TMUX_NOTE_COLORS)
+    colored_prefix = f"#[fg=colour{color}]{prefix}#[fg=colour{TMUX_NOTE_BASE_COLOR}]"
+    line1, line2 = split_into_two_lines(f"{colored_prefix} {sentence}")
     try:
         window = subprocess.run(
             ["tmux", "display-message", "-p", "-t", pane, "#{window_id}"],
@@ -182,7 +217,9 @@ def set_tmux_window_note(text: str, env=None) -> None:
 
 
 def _debug_log(record: dict) -> None:
-    """Append one JSONL line; best-effort, swallows I/O errors."""
+    """Append one JSONL line when DEBUG_LOG_ENABLED; best-effort, swallows I/O errors."""
+    if not DEBUG_LOG_ENABLED:
+        return
     try:
         DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         line = json.dumps({"ts": datetime.now().isoformat(timespec="seconds"), **record}, ensure_ascii=False)
@@ -227,9 +264,9 @@ def run(raw_input: str) -> dict:
         return {}
 
     _debug_log({**base, "decision": "annotated", "sentence": sentence})
-    message = f"[bash-brief {_now_stamp()}] {sentence}"
-    set_tmux_window_note(message)
-    return {"systemMessage": message}
+    prefix = f"[bash-brief {_now_stamp()}]"
+    set_tmux_window_note(prefix, sentence)
+    return {"systemMessage": f"{prefix} {sentence}"}
 
 
 def main() -> None:

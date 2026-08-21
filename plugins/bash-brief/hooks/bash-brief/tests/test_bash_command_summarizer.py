@@ -58,6 +58,15 @@ def _fixed_now_stamp(monkeypatch):
     monkeypatch.setattr(summarizer, "_now_stamp", lambda: FIXED_TIME)
 
 
+FIXED_COLOR = 111
+
+
+@pytest.fixture(autouse=True)
+def _fixed_random_color(monkeypatch):
+    """Freeze the tmux note's random color choice for deterministic assertions."""
+    monkeypatch.setattr(summarizer.random, "choice", lambda seq: FIXED_COLOR)
+
+
 class _StubClient:
     """Fake AnthropicClient instance with a configurable complete() result."""
 
@@ -160,7 +169,7 @@ def test_run_happyPath_setsTmuxWindowNote(monkeypatch, _stub_tmux_note):
 
     summarizer.run(hook_input)
 
-    _stub_tmux_note.assert_called_once_with(f"[bash-brief {FIXED_TIME}] {SAMPLE_SENTENCE}")
+    _stub_tmux_note.assert_called_once_with(f"[bash-brief {FIXED_TIME}]", SAMPLE_SENTENCE)
 
 
 def test_run_noCredentials_doesNotSetTmuxWindowNote(monkeypatch, _stub_tmux_note):
@@ -173,6 +182,7 @@ def test_run_noCredentials_doesNotSetTmuxWindowNote(monkeypatch, _stub_tmux_note
 
 
 def test_run_happyPath_writesAnnotatedDebugLogLine(monkeypatch):
+    monkeypatch.setattr(summarizer, "DEBUG_LOG_ENABLED", True)
     stub_client = _StubClient(response_text=SAMPLE_SENTENCE)
     monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True, stub_client))
     hook_input = _bash_input("cat response.json | jq '.status'")
@@ -186,6 +196,7 @@ def test_run_happyPath_writesAnnotatedDebugLogLine(monkeypatch):
 
 
 def test_run_toolNameNotBash_writesSkipDebugLogLine(monkeypatch):
+    monkeypatch.setattr(summarizer, "DEBUG_LOG_ENABLED", True)
     monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True))
     hook_input = _bash_input("ls -la", tool_name="Read")
 
@@ -194,6 +205,17 @@ def test_run_toolNameNotBash_writesSkipDebugLogLine(monkeypatch):
     record = json.loads(summarizer.DEBUG_LOG_PATH.read_text().strip())
     assert record["decision"] == "skip_not_bash"
     assert record["tool_name"] == "Read"
+
+
+def test_run_debugLogDisabledByDefault_doesNotWriteLogFile(monkeypatch):
+    assert summarizer.DEBUG_LOG_ENABLED is False
+    stub_client = _StubClient(response_text=SAMPLE_SENTENCE)
+    monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+    hook_input = _bash_input("cat response.json | jq '.status'")
+
+    summarizer.run(hook_input)
+
+    assert not summarizer.DEBUG_LOG_PATH.exists()
 
 
 def test_run_happyPath_sendsCommandInPrompt(monkeypatch):
@@ -297,13 +319,19 @@ def test_main_toolNameNotBash_writesEmptyDict(monkeypatch, capsys):
     assert result == {}
 
 
+def test_tmuxNoteColors_hasAtLeast20DistinctValidColors():
+    assert len(summarizer.TMUX_NOTE_COLORS) >= 20
+    assert len(set(summarizer.TMUX_NOTE_COLORS)) == len(summarizer.TMUX_NOTE_COLORS)
+    assert all(0 <= c <= 255 for c in summarizer.TMUX_NOTE_COLORS)
+
+
 def test_setTmuxWindowNote_noTmuxPane_doesNotCallSubprocess(monkeypatch):
     def _fail_if_called(*args, **kwargs):
         raise AssertionError("subprocess.run should not be called without $TMUX_PANE")
 
     monkeypatch.setattr(subprocess, "run", _fail_if_called)
 
-    _REAL_SET_TMUX_WINDOW_NOTE("🔎 test note", env={})
+    _REAL_SET_TMUX_WINDOW_NOTE("[prefix]", "test note", env={})
 
 
 def test_setTmuxWindowNote_withTmuxPane_resolvesWindowThenSetsBothLineOptions(monkeypatch):
@@ -317,11 +345,35 @@ def test_setTmuxWindowNote_withTmuxPane_resolvesWindowThenSetsBothLineOptions(mo
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
 
-    _REAL_SET_TMUX_WINDOW_NOTE("left right", env={"TMUX_PANE": "%7"})
+    colored_prefix = f"#[fg=colour{FIXED_COLOR}][prefix]#[fg=colour{summarizer.TMUX_NOTE_BASE_COLOR}]"
+    expected_line1, expected_line2 = summarizer.split_into_two_lines(f"{colored_prefix} some sentence")
+
+    _REAL_SET_TMUX_WINDOW_NOTE("[prefix]", "some sentence", env={"TMUX_PANE": "%7"})
 
     assert calls[0] == ["tmux", "display-message", "-p", "-t", "%7", "#{window_id}"]
-    assert calls[1] == ["tmux", "set-option", "-w", "-t", "@3", "@bash_brief_note_1", "left"]
-    assert calls[2] == ["tmux", "set-option", "-w", "-t", "@3", "@bash_brief_note_2", "right"]
+    assert calls[1] == ["tmux", "set-option", "-w", "-t", "@3", "@bash_brief_note_1", expected_line1]
+    assert calls[2] == ["tmux", "set-option", "-w", "-t", "@3", "@bash_brief_note_2", expected_line2]
+
+
+def test_setTmuxWindowNote_coloring_onlyWrapsPrefixNotSentence(monkeypatch):
+    calls = []
+
+    def _fake_run(args, **kwargs):
+        calls.append(args)
+        if args[:2] == ["tmux", "display-message"]:
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="@3\n")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    _REAL_SET_TMUX_WINDOW_NOTE("[prefix]", "some sentence", env={"TMUX_PANE": "%7"})
+
+    combined = calls[1][-1] + " " + calls[2][-1]
+    reset = f"#[fg=colour{summarizer.TMUX_NOTE_BASE_COLOR}]"
+    assert f"#[fg=colour{FIXED_COLOR}][prefix]{reset}" in combined
+    assert "some sentence" in combined
+    # No further color-open codes after the reset - the sentence stays in the row's base color.
+    assert combined.split(reset, 1)[1].count("#[fg=colour") == 0
 
 
 def test_setTmuxWindowNote_emptyWindowId_doesNotCallSetOption(monkeypatch):
@@ -333,7 +385,7 @@ def test_setTmuxWindowNote_emptyWindowId_doesNotCallSetOption(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
 
-    _REAL_SET_TMUX_WINDOW_NOTE("left right", env={"TMUX_PANE": "%7"})
+    _REAL_SET_TMUX_WINDOW_NOTE("[prefix]", "some sentence", env={"TMUX_PANE": "%7"})
 
     assert len(calls) == 1
 
@@ -344,7 +396,7 @@ def test_setTmuxWindowNote_displayMessageFails_doesNotRaise(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
 
-    _REAL_SET_TMUX_WINDOW_NOTE("left right", env={"TMUX_PANE": "%7"})
+    _REAL_SET_TMUX_WINDOW_NOTE("[prefix]", "some sentence", env={"TMUX_PANE": "%7"})
 
 
 def test_setTmuxWindowNote_tmuxBinaryMissing_doesNotRaise(monkeypatch):
@@ -353,7 +405,7 @@ def test_setTmuxWindowNote_tmuxBinaryMissing_doesNotRaise(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
 
-    _REAL_SET_TMUX_WINDOW_NOTE("left right", env={"TMUX_PANE": "%7"})
+    _REAL_SET_TMUX_WINDOW_NOTE("[prefix]", "some sentence", env={"TMUX_PANE": "%7"})
 
 
 def test_splitIntoTwoLines_emptyString_returnsTwoEmptyStrings():

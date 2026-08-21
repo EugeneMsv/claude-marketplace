@@ -32,7 +32,15 @@ set -g status-format[3] '#[align=left,bg=colour236,fg=colour223] #{@bash_brief_n
 
 Then `tmux source-file ~/.tmux.conf` (or restart tmux) to apply it. Once set, the note is **never cleared automatically** — there is no hook event that reliably fires "after the human's decision" regardless of outcome (`PostToolUse` only fires on the allow-and-succeeded branch, never on a manual deny), so attempting partial cleanup would be inconsistent. The rows are a running log of the last Bash command's description, not a per-command popup.
 
+The `[bash-brief HH:MM:SS]` tag (only the tag, not the sentence) also gets a freshly random foreground color from `TMUX_NOTE_COLORS` (30 tmux 256-color codes, embedded directly in the option value as `#[fg=colourN]...#[fg=colourM]` around just the tag) — the point is to draw the eye to a fresh update, since a message that always looked the same would blend into a status bar you've stopped consciously reading. The sentence itself always renders in the row's normal color.
+
+**If you change the `fg=` color in your own status-format rows above, also update `TMUX_NOTE_BASE_COLOR` in `bash-command-summarizer.py` to match.** The reset after the tag targets that exact color, not tmux's "default" — a sentence long enough to span both lines has its tail (still on line 1) explicitly reset to this color, while line 2 re-declares its own `fg=` from the row format itself; if the two don't match, the two halves of one sentence visibly render in different colors.
+
 Without tmux, or without this config, `bash-command-summarizer.py` silently skips the tmux write (checks `$TMUX_PANE`) and falls back to `systemMessage` only.
+
+## Debug Logging
+
+Off by default. `bash-command-summarizer.py`'s `DEBUG_LOG_ENABLED` constant gates a JSONL trail (`~/.claude/bash-brief/debug.jsonl`, one line per invocation: fired/skipped and why, or errored) — flip it to `True` to confirm the hook is actually firing without needing a debugger on a subprocess Claude Code spawns per Bash call.
 
 ## Model Resolution
 
