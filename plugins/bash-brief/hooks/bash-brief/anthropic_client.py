@@ -13,10 +13,53 @@ run scripts/sync-shared-files.sh to propagate the change.
 
 import json
 import os
+import subprocess
+import sys
+import time
 import urllib.request
 
 DEFAULT_BASE_URL = "https://api.anthropic.com"
 API_VERSION = "2023-06-01"
+
+# Users authenticated via Claude subscription/OAuth (rather than a raw
+# ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN) have no credential exposed as an env
+# var for hook subprocesses to use. Claude Code itself stores that session's
+# OAuth token in the macOS Keychain under this service name; its accessToken
+# works as a Bearer credential against the same public Messages API this
+# client calls. This is an internal storage detail of Claude Code, not a
+# documented/stable API, so every step here fails silently (falls through to
+# "no credentials") rather than raising.
+_MACOS_KEYCHAIN_SERVICE = "Claude Code-credentials"
+
+
+def _read_macos_keychain_oauth_token() -> str | None:
+    """Return Claude Code's own session accessToken from the macOS Keychain, if
+    present, unexpired, and parseable. Never raises."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        result = subprocess.run(
+            ["security", "find-generic-password", "-w", "-s", _MACOS_KEYCHAIN_SERVICE],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+        oauth = json.loads(result.stdout)["claudeAiOauth"]
+        access_token = oauth["accessToken"]
+        expires_at_ms = oauth["expiresAt"]
+    except (
+        subprocess.SubprocessError,
+        OSError,
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+    ):
+        return None
+
+    if not access_token or time.time() * 1000 >= expires_at_ms:
+        return None
+    return access_token
 
 
 class CredentialsMissingError(RuntimeError):
@@ -35,19 +78,30 @@ class AnthropicClient:
         self._timeout = timeout
 
     @staticmethod
+    def _resolve_credentials():
+        """Return (api_key, auth_token). Prefers explicit env vars; falls back to
+        the macOS Keychain OAuth token for subscription/OAuth-authenticated users."""
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        auth_token = os.environ.get("ANTHROPIC_AUTH_TOKEN")
+        if api_key or auth_token:
+            return api_key, auth_token
+        return None, _read_macos_keychain_oauth_token()
+
+    @staticmethod
     def has_credentials() -> bool:
-        """Whether the environment carries any usable credential."""
-        return bool(
-            os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
-        )
+        """Whether any usable credential (env var or Keychain fallback) is available."""
+        api_key, auth_token = AnthropicClient._resolve_credentials()
+        return bool(api_key or auth_token)
 
     @classmethod
     def from_env(cls, timeout=60) -> "AnthropicClient":
-        """Build a client from ANTHROPIC_* environment variables."""
+        """Build a client from ANTHROPIC_* environment variables, falling back to
+        the macOS Keychain OAuth token when neither env var is set."""
+        api_key, auth_token = cls._resolve_credentials()
         return cls(
             base_url=os.environ.get("ANTHROPIC_BASE_URL"),
-            api_key=os.environ.get("ANTHROPIC_API_KEY"),
-            auth_token=os.environ.get("ANTHROPIC_AUTH_TOKEN"),
+            api_key=api_key,
+            auth_token=auth_token,
             timeout=timeout,
         )
 

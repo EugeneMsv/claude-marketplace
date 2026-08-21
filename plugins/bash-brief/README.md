@@ -25,6 +25,15 @@ Resolves the model in this order:
 1. `ANTHROPIC_DEFAULT_HAIKU_MODEL` — Claude Code's own documented env var for pinning the Haiku-class model (useful on Amazon Bedrock/Google Vertex deployments where the bare alias may not be enabled).
 2. `claude-haiku-4-5` — the Claude API's undated convenience alias for the latest Haiku 4.5 snapshot, used when the env var above is unset.
 
+## Credential Resolution
+
+This hook calls the public Messages API directly, so it needs a credential of its own — one that's separate from however you're logged into Claude Code. `anthropic_client.py` resolves it in this order:
+
+1. `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` env vars, if either is set.
+2. On macOS, the OAuth access token Claude Code itself stores in the login Keychain under the service name `Claude Code-credentials` (`claudeAiOauth.accessToken`) — used only if unexpired. This lets subscription/OAuth-authenticated users (no plain API key in their environment) get a working hook without exporting a separate credential. This is an internal storage detail of Claude Code, not a documented/stable API, so every step here fails silently back to "no credentials" rather than raising if the entry is missing, malformed, or the shape changes in a future Claude Code version.
+
+If neither resolves, the hook silently no-ops (see Failure Handling below) rather than prompting for a key.
+
 ## Failure Handling
 
 Missing credentials, network errors, malformed hook input, or an empty/unusable model response all fall through to a silent `{}` — the Bash call is never blocked or delayed by this hook failing (mirrors the `grep-token-killer` plugin's try/except safety net).
