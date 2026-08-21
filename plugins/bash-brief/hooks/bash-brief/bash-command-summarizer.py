@@ -14,8 +14,16 @@ import json
 import os
 import re
 import sys
+from datetime import datetime
+from pathlib import Path
 
 from anthropic_client import AnthropicClient
+
+# Always-on JSONL trail of every decision this hook makes (fired, skipped and
+# why, or errored) — mirrors grep-token-killer's audit log. Lets you confirm
+# the hook is actually firing without needing a debugger on a subprocess
+# Claude Code spawns per Bash call.
+DEBUG_LOG_PATH = Path.home() / ".claude" / "bash-brief" / "debug.jsonl"
 
 # Undated alias — the Claude API's own convenience pointer to the latest Haiku
 # 4.5 snapshot. ANTHROPIC_DEFAULT_HAIKU_MODEL is Claude Code's own documented
@@ -83,34 +91,56 @@ def clean_sentence(raw: str) -> str:
     return sentence
 
 
+def _debug_log(record: dict) -> None:
+    """Append one JSONL line; best-effort, swallows I/O errors."""
+    try:
+        DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps({"ts": datetime.now().isoformat(timespec="seconds"), **record}, ensure_ascii=False)
+        with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except (OSError, TypeError, ValueError):
+        pass
+
+
 def run(raw_input: str) -> dict:
     """Return the response dict to print ({} = no annotation). Never raises."""
     try:
         hook_input = json.loads(raw_input)
     except (json.JSONDecodeError, TypeError):
+        _debug_log({"decision": "skip_malformed_json"})
         return {}
 
-    if hook_input.get("tool_name") != "Bash":
-        return {}
-    if hook_input.get("permission_mode") != "ask":
-        return {}
-
+    tool_name = hook_input.get("tool_name")
+    permission_mode = hook_input.get("permission_mode")
     command = (hook_input.get("tool_input") or {}).get("command", "").strip()
+    base = {"tool_name": tool_name, "permission_mode": permission_mode, "command": command[:200]}
+
+    if tool_name != "Bash":
+        _debug_log({**base, "decision": "skip_not_bash"})
+        return {}
+    if permission_mode != "ask":
+        _debug_log({**base, "decision": "skip_permission_mode_not_ask"})
+        return {}
     if not command:
+        _debug_log({**base, "decision": "skip_empty_command"})
         return {}
 
     if not AnthropicClient.has_credentials():
+        _debug_log({**base, "decision": "skip_no_credentials"})
         return {}
 
     try:
         raw_response = summarize_command(AnthropicClient.from_env(), command)
         sentence = clean_sentence(raw_response)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        _debug_log({**base, "decision": "skip_llm_error", "error": repr(exc)})
         return {}
 
     if not sentence:
+        _debug_log({**base, "decision": "skip_empty_sentence", "raw_response": raw_response[:200]})
         return {}
 
+    _debug_log({**base, "decision": "annotated", "sentence": sentence})
     return {"systemMessage": f"[bash-brief] {sentence}"}
 
 

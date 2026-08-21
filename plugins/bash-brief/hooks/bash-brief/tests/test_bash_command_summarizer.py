@@ -26,6 +26,12 @@ summarizer = _load_hook_module()
 SAMPLE_SENTENCE = "Parses a JSON file to extract the response status field."
 
 
+@pytest.fixture(autouse=True)
+def _redirect_debug_log(monkeypatch, tmp_path):
+    """Keep debug-log writes inside tmp_path instead of the real ~/.claude dir."""
+    monkeypatch.setattr(summarizer, "DEBUG_LOG_PATH", tmp_path / "debug.jsonl")
+
+
 class _StubClient:
     """Fake AnthropicClient instance with a configurable complete() result."""
 
@@ -137,6 +143,30 @@ def test_run_happyPath_returnsSystemMessageWithSentence(monkeypatch):
     result = summarizer.run(hook_input)
 
     assert result == {"systemMessage": f"[bash-brief] {SAMPLE_SENTENCE}"}
+
+
+def test_run_happyPath_writesAnnotatedDebugLogLine(monkeypatch):
+    stub_client = _StubClient(response_text=SAMPLE_SENTENCE)
+    monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+    hook_input = _bash_input("cat response.json | jq '.status'")
+
+    summarizer.run(hook_input)
+
+    record = json.loads(summarizer.DEBUG_LOG_PATH.read_text().strip())
+    assert record["decision"] == "annotated"
+    assert record["sentence"] == SAMPLE_SENTENCE
+    assert record["command"] == "cat response.json | jq '.status'"
+
+
+def test_run_permissionModeNotAsk_writesSkipDebugLogLine(monkeypatch):
+    monkeypatch.setattr(summarizer, "AnthropicClient", _stub_anthropic_client(True))
+    hook_input = _bash_input("ls -la", permission_mode="allow")
+
+    summarizer.run(hook_input)
+
+    record = json.loads(summarizer.DEBUG_LOG_PATH.read_text().strip())
+    assert record["decision"] == "skip_permission_mode_not_ask"
+    assert record["permission_mode"] == "allow"
 
 
 def test_run_happyPath_sendsCommandInPrompt(monkeypatch):
