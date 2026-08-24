@@ -6,9 +6,11 @@ Works against the public API or any proxy via ANTHROPIC_BASE_URL, and supports
 both ``x-api-key`` and bearer ``auth-token`` credentials. Uses urllib so it has
 no third-party dependency (the ``anthropic`` SDK is not assumed to be installed).
 
-Canonical copy — do not edit the per-plugin duplicates under
-plugins/<name>/hooks/<name>/anthropic_client.py directly. Edit this file, then
-run scripts/sync-shared-files.sh to propagate the change.
+This file is the canonical, hand-maintained source — edit it directly. The
+per-plugin copies under plugins/<name>/hooks/<name>/anthropic_client.py are
+generated duplicates: never touch those directly. Instead, change this file
+and run scripts/sync-shared-files.sh to propagate the change to every plugin
+that vendors a copy.
 """
 
 import json
@@ -136,3 +138,49 @@ class AnthropicClient:
             if block.get("type") == "text":
                 return block["text"].strip()
         return ""
+
+    def complete_with_tool(
+        self,
+        model: str,
+        prompt: str,
+        tool_name: str,
+        tool_description: str,
+        input_schema: dict,
+        max_tokens: int,
+    ) -> dict:
+        """Send a single user message with a forced tool call and return the tool's
+        parsed input dict.
+
+        Uses tool_choice to force the model to call exactly this tool, and
+        "strict": true so its arguments are constrained to conform to
+        input_schema by construction - this is what makes the result safe to
+        branch on programmatically without fragile free-text parsing.
+        """
+        payload = json.dumps(
+            {
+                "model": model,
+                "max_tokens": max_tokens,
+                "tools": [
+                    {
+                        "name": tool_name,
+                        "description": tool_description,
+                        "input_schema": input_schema,
+                        "strict": True,
+                    }
+                ],
+                "tool_choice": {"type": "tool", "name": tool_name},
+                "messages": [{"role": "user", "content": prompt}],
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self._base_url}/v1/messages",
+            data=payload,
+            headers=self._headers(),
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=self._timeout) as response:  # noqa: S310
+            body = json.loads(response.read().decode("utf-8"))
+        for block in body["content"]:
+            if block.get("type") == "tool_use" and block.get("name") == tool_name:
+                return block["input"]
+        raise ValueError(f"no tool_use block found for tool {tool_name!r} in response")

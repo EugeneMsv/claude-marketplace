@@ -172,3 +172,128 @@ def test_fromEnv_noEnvVarsValidKeychainToken_usesItAsAuthToken(monkeypatch):
 
     assert client._api_key is None
     assert client._auth_token == "oauth-token-value"
+
+
+_TOOL_NAME = "classify_command_security"
+_TOOL_DESCRIPTION = "Classify the security risk of a shell command."
+_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "decision": {"type": "string", "enum": ["allow", "ask", "deny"]},
+        "reasoning": {"type": "string"},
+    },
+    "required": ["decision", "reasoning"],
+}
+
+
+def test_completeWithTool_toolUseBlockMatchesName_returnsInputDict():
+    body = {
+        "content": [
+            {"type": "tool_use", "name": _TOOL_NAME, "input": {"decision": "allow", "reasoning": "safe"}}
+        ]
+    }
+    client = AnthropicClient(api_key="test-key")
+
+    with patch("urllib.request.urlopen", return_value=_make_response(body)):
+        result = client.complete_with_tool(
+            model="claude-sonnet-5",
+            prompt="Classify: python3 -c 'print(1)'",
+            tool_name=_TOOL_NAME,
+            tool_description=_TOOL_DESCRIPTION,
+            input_schema=_INPUT_SCHEMA,
+            max_tokens=300,
+        )
+
+    assert result == {"decision": "allow", "reasoning": "safe"}
+
+
+def test_completeWithTool_thinkingBlockBeforeToolUse_skipsToToolUseBlock():
+    body = {
+        "content": [
+            {"type": "thinking", "thinking": "reasoning...", "signature": "abc"},
+            {"type": "tool_use", "name": _TOOL_NAME, "input": {"decision": "deny", "reasoning": "destructive"}},
+        ]
+    }
+    client = AnthropicClient(api_key="test-key")
+
+    with patch("urllib.request.urlopen", return_value=_make_response(body)):
+        result = client.complete_with_tool(
+            model="claude-sonnet-5",
+            prompt="Classify: rm -rf /",
+            tool_name=_TOOL_NAME,
+            tool_description=_TOOL_DESCRIPTION,
+            input_schema=_INPUT_SCHEMA,
+            max_tokens=300,
+        )
+
+    assert result == {"decision": "deny", "reasoning": "destructive"}
+
+
+def test_completeWithTool_noToolUseBlock_raisesValueError():
+    body = {"content": [{"type": "text", "text": "I refuse to use the tool."}]}
+    client = AnthropicClient(api_key="test-key")
+
+    with patch("urllib.request.urlopen", return_value=_make_response(body)):
+        with pytest.raises(ValueError, match=_TOOL_NAME):
+            client.complete_with_tool(
+                model="claude-sonnet-5",
+                prompt="Classify: python3 -c 'print(1)'",
+                tool_name=_TOOL_NAME,
+                tool_description=_TOOL_DESCRIPTION,
+                input_schema=_INPUT_SCHEMA,
+                max_tokens=300,
+            )
+
+
+def test_completeWithTool_buildsRequestWithToolChoiceAndStrictSchema():
+    body = {
+        "content": [
+            {"type": "tool_use", "name": _TOOL_NAME, "input": {"decision": "ask", "reasoning": "uncertain"}}
+        ]
+    }
+    client = AnthropicClient(api_key="test-key")
+
+    with patch("urllib.request.urlopen", return_value=_make_response(body)) as mock_urlopen:
+        client.complete_with_tool(
+            model="claude-sonnet-5",
+            prompt="Classify: python3 -m http.server",
+            tool_name=_TOOL_NAME,
+            tool_description=_TOOL_DESCRIPTION,
+            input_schema=_INPUT_SCHEMA,
+            max_tokens=300,
+        )
+
+    sent_request = mock_urlopen.call_args[0][0]
+    payload = json.loads(sent_request.data.decode("utf-8"))
+
+    assert payload["tools"] == [
+        {
+            "name": _TOOL_NAME,
+            "description": _TOOL_DESCRIPTION,
+            "input_schema": _INPUT_SCHEMA,
+            "strict": True,
+        }
+    ]
+    assert payload["tool_choice"] == {"type": "tool", "name": _TOOL_NAME}
+    assert payload["model"] == "claude-sonnet-5"
+    assert payload["max_tokens"] == 300
+
+
+def test_completeWithTool_toolUseBlockWrongName_raisesValueError():
+    body = {
+        "content": [
+            {"type": "tool_use", "name": "some_other_tool", "input": {"unexpected": "shape"}}
+        ]
+    }
+    client = AnthropicClient(api_key="test-key")
+
+    with patch("urllib.request.urlopen", return_value=_make_response(body)):
+        with pytest.raises(ValueError, match=_TOOL_NAME):
+            client.complete_with_tool(
+                model="claude-sonnet-5",
+                prompt="Classify: python3 -c 'print(1)'",
+                tool_name=_TOOL_NAME,
+                tool_description=_TOOL_DESCRIPTION,
+                input_schema=_INPUT_SCHEMA,
+                max_tokens=300,
+            )
