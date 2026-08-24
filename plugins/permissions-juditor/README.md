@@ -53,10 +53,11 @@ The full prompt (including few-shot examples) lives in `PROMPT_TEMPLATE` in `sec
 
 This hook calls the public Messages API directly via the shared `anthropic_client.py`, so it needs a credential of its own:
 
-1. `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` env vars, if either is set.
-2. On macOS, the OAuth access token Claude Code itself stores in the login Keychain under the service name `Claude Code-credentials` — used only if unexpired. This lets subscription/OAuth-authenticated users get a working hook without exporting a separate credential.
+1. `HOOKS_LLM_URL` + `HOOKS_LLM_AUTH_TOKEN`, both required together — an explicit, portable endpoint+credential configuration you set yourself (e.g. via a `env` block in `~/.claude/settings.json`), naming exactly which endpoint and bearer token every hook using the shared client should call. Takes priority over everything below, and doesn't depend on Claude Code's internal, undocumented Keychain storage format. Setting only one of the two is treated as neither being set.
+2. `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` env vars, if either is set.
+3. On macOS, the OAuth access token Claude Code itself stores in the login Keychain under the service name `Claude Code-credentials` — used only if unexpired. This lets subscription/OAuth-authenticated users get a working hook without exporting a separate credential.
 
-If neither resolves, the hook silently no-ops (logged as `skip_no_credentials`) rather than prompting for a key.
+If none resolve, the hook silently no-ops (logged as `skip_no_credentials`) rather than prompting for a key.
 
 ## Failure Handling
 
