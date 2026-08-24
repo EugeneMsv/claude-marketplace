@@ -16,6 +16,7 @@ marketplace/
     ├── claude-code-guide/
     ├── code-sentinel/
     ├── feedback-loop/
+    ├── permissions-juditor/
     ├── plan-guard/
     └── task-seeder/
 ```
@@ -81,6 +82,18 @@ Expert code review with layer-by-layer flow diagrams, model diff trees, and inte
 **Skills:** `code-review`, `mr-nitpick-sentinel`
 
 **[Full Documentation →](plugins/code-sentinel/README.md)**
+
+---
+
+### permissions-juditor
+
+Before a Bash permission prompt is shown, calls Sonnet with a security-classification prompt and lets it decide allow (auto-clear), ask (prompt proceeds, with reasoning attached), or deny (blocked). Scope is controlled by the `PERMISSIONS_JUDITOR_WATCHED_COMMANDS` env var (defaults to `python3`; `""` disables the plugin entirely) and is segment-aware via `shlex`, so a watched command behind a pipe, chain, `sudo`, or env-assignment prefix is still detected.
+
+**Hooks:** `security-judge` (`PermissionRequest`, `Bash`)
+
+**Data directory:** `~/.claude/permissions-juditor/` — `decisions.jsonl` (one line per invocation, always on)
+
+**[Full Documentation →](plugins/permissions-juditor/README.md)**
 
 ---
 
