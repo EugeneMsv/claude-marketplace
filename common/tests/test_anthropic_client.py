@@ -270,13 +270,73 @@ def test_completeWithTool_buildsRequestWithToolChoiceAndStrictSchema():
         {
             "name": _TOOL_NAME,
             "description": _TOOL_DESCRIPTION,
-            "input_schema": _INPUT_SCHEMA,
+            "input_schema": {**_INPUT_SCHEMA, "additionalProperties": False},
             "strict": True,
         }
     ]
     assert payload["tool_choice"] == {"type": "tool", "name": _TOOL_NAME}
     assert payload["model"] == "claude-sonnet-5"
     assert payload["max_tokens"] == 300
+
+
+def test_completeWithTool_schemaMissingAdditionalProperties_defaultsToFalse():
+    """The API rejects a strict object schema with HTTP 400 unless
+    additionalProperties is explicitly set - this must be defaulted rather
+    than left for every caller to remember."""
+    body = {"content": [{"type": "tool_use", "name": _TOOL_NAME, "input": {"decision": "allow", "reasoning": "safe"}}]}
+    client = AnthropicClient(api_key="test-key")
+    schema_without_it = {k: v for k, v in _INPUT_SCHEMA.items() if k != "additionalProperties"}
+
+    with patch("urllib.request.urlopen", return_value=_make_response(body)) as mock_urlopen:
+        client.complete_with_tool(
+            model="claude-sonnet-5",
+            prompt="Classify: python3 -c 'print(1)'",
+            tool_name=_TOOL_NAME,
+            tool_description=_TOOL_DESCRIPTION,
+            input_schema=schema_without_it,
+            max_tokens=300,
+        )
+
+    payload = json.loads(mock_urlopen.call_args[0][0].data.decode("utf-8"))
+    assert payload["tools"][0]["input_schema"]["additionalProperties"] is False
+
+
+def test_completeWithTool_schemaWithExplicitAdditionalProperties_respectsCallerValue():
+    body = {"content": [{"type": "tool_use", "name": _TOOL_NAME, "input": {"decision": "allow", "reasoning": "safe"}}]}
+    client = AnthropicClient(api_key="test-key")
+    schema_with_true = {**_INPUT_SCHEMA, "additionalProperties": True}
+
+    with patch("urllib.request.urlopen", return_value=_make_response(body)) as mock_urlopen:
+        client.complete_with_tool(
+            model="claude-sonnet-5",
+            prompt="Classify: python3 -c 'print(1)'",
+            tool_name=_TOOL_NAME,
+            tool_description=_TOOL_DESCRIPTION,
+            input_schema=schema_with_true,
+            max_tokens=300,
+        )
+
+    payload = json.loads(mock_urlopen.call_args[0][0].data.decode("utf-8"))
+    assert payload["tools"][0]["input_schema"]["additionalProperties"] is True
+
+
+def test_completeWithTool_doesNotMutateCallersSchemaDict():
+    body = {"content": [{"type": "tool_use", "name": _TOOL_NAME, "input": {"decision": "allow", "reasoning": "safe"}}]}
+    client = AnthropicClient(api_key="test-key")
+    schema_without_it = {k: v for k, v in _INPUT_SCHEMA.items() if k != "additionalProperties"}
+    original = dict(schema_without_it)
+
+    with patch("urllib.request.urlopen", return_value=_make_response(body)):
+        client.complete_with_tool(
+            model="claude-sonnet-5",
+            prompt="Classify: python3 -c 'print(1)'",
+            tool_name=_TOOL_NAME,
+            tool_description=_TOOL_DESCRIPTION,
+            input_schema=schema_without_it,
+            max_tokens=300,
+        )
+
+    assert schema_without_it == original
 
 
 def test_completeWithTool_toolUseBlockWrongName_raisesValueError():

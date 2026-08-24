@@ -73,6 +73,10 @@ INPUT_SCHEMA = {
         "reasoning": {"type": "string"},
     },
     "required": ["decision", "reasoning"],
+    # Required by the API for a strict tool schema (HTTP 400 otherwise) - also
+    # defaulted defensively in AnthropicClient.complete_with_tool(), but set
+    # explicitly here too so the schema is self-documenting on its own.
+    "additionalProperties": False,
 }
 MAX_TOKENS = 300
 MAX_COMMAND_CHARS = 4000

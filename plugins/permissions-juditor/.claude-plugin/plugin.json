@@ -1,5 +1,5 @@
 {
   "name": "permissions-juditor",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Permissions Juditor — Sonnet-based security classification before permission is requested (scope controlled by PERMISSIONS_JUDITOR_WATCHED_COMMANDS env var, defaults to python3)"
 }

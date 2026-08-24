@@ -155,7 +155,15 @@ class AnthropicClient:
         "strict": true so its arguments are constrained to conform to
         input_schema by construction - this is what makes the result safe to
         branch on programmatically without fragile free-text parsing.
+
+        The API rejects a strict object schema with HTTP 400 unless
+        "additionalProperties": false is set explicitly - a non-obvious
+        requirement callers would otherwise discover only via that error, so
+        it's defaulted here (via setdefault, on a copy - the caller's dict is
+        never mutated) rather than left as tribal knowledge every caller must
+        remember. An explicit value already present in input_schema wins.
         """
+        schema = {**input_schema, "additionalProperties": input_schema.get("additionalProperties", False)}
         payload = json.dumps(
             {
                 "model": model,
@@ -164,7 +172,7 @@ class AnthropicClient:
                     {
                         "name": tool_name,
                         "description": tool_description,
-                        "input_schema": input_schema,
+                        "input_schema": schema,
                         "strict": True,
                     }
                 ],
