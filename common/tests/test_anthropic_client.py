@@ -14,6 +14,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from anthropic_client import AnthropicClient, CredentialsMissingError
 
 
+@pytest.fixture(autouse=True)
+def _clean_hooks_llm_env(monkeypatch):
+    """Ensure HOOKS_LLM_URL/HOOKS_LLM_AUTH_TOKEN start unset for every test,
+    regardless of the real environment - tests that need them set do so
+    explicitly via monkeypatch.setenv."""
+    monkeypatch.delenv("HOOKS_LLM_URL", raising=False)
+    monkeypatch.delenv("HOOKS_LLM_AUTH_TOKEN", raising=False)
+
+
 def _make_response(body: dict):
     """Build a context-manager mock matching urllib.request.urlopen's response object."""
     response = MagicMock()
@@ -172,6 +181,73 @@ def test_fromEnv_noEnvVarsValidKeychainToken_usesItAsAuthToken(monkeypatch):
 
     assert client._api_key is None
     assert client._auth_token == "oauth-token-value"
+
+
+# --- HOOKS_LLM_URL / HOOKS_LLM_AUTH_TOKEN resolution tier -----------------------
+
+
+def test_hasCredentials_hooksLlmUrlAndAuthTokenSet_returnsTrue(monkeypatch):
+    monkeypatch.setenv("HOOKS_LLM_URL", "https://proxy.example.com")
+    monkeypatch.setenv("HOOKS_LLM_AUTH_TOKEN", "hooks-token")
+
+    assert AnthropicClient.has_credentials() is True
+
+
+def test_hasCredentials_onlyHooksLlmUrlSet_fallsThroughToNextTier(monkeypatch):
+    monkeypatch.setenv("HOOKS_LLM_URL", "https://proxy.example.com")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    assert AnthropicClient.has_credentials() is False
+
+
+def test_hasCredentials_onlyHooksLlmAuthTokenSet_fallsThroughToNextTier(monkeypatch):
+    monkeypatch.setenv("HOOKS_LLM_AUTH_TOKEN", "hooks-token")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    assert AnthropicClient.has_credentials() is False
+
+
+def test_fromEnv_hooksLlmVarsSet_usesHooksLlmUrlAsBaseUrlAndTokenAsAuthToken(monkeypatch):
+    monkeypatch.setenv("HOOKS_LLM_URL", "https://proxy.example.com")
+    monkeypatch.setenv("HOOKS_LLM_AUTH_TOKEN", "hooks-token")
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+
+    client = AnthropicClient.from_env()
+
+    assert client._base_url == "https://proxy.example.com"
+    assert client._api_key is None
+    assert client._auth_token == "hooks-token"
+
+
+def test_fromEnv_hooksLlmVarsSet_takesPriorityOverAnthropicApiKey(monkeypatch):
+    monkeypatch.setenv("HOOKS_LLM_URL", "https://proxy.example.com")
+    monkeypatch.setenv("HOOKS_LLM_AUTH_TOKEN", "hooks-token")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "should-be-ignored")
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("keychain should not be consulted when HOOKS_LLM_* vars are set")
+
+    monkeypatch.setattr(subprocess, "run", _fail_if_called)
+
+    client = AnthropicClient.from_env()
+
+    assert client._api_key is None
+    assert client._auth_token == "hooks-token"
+    assert client._base_url == "https://proxy.example.com"
+
+
+def test_fromEnv_hooksLlmUrlOverridesAnthropicBaseUrl(monkeypatch):
+    monkeypatch.setenv("HOOKS_LLM_URL", "https://proxy.example.com")
+    monkeypatch.setenv("HOOKS_LLM_AUTH_TOKEN", "hooks-token")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://should-be-ignored.example.com")
+
+    client = AnthropicClient.from_env()
+
+    assert client._base_url == "https://proxy.example.com"
 
 
 _TOOL_NAME = "classify_command_security"

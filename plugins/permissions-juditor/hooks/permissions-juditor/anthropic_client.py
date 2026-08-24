@@ -81,27 +81,53 @@ class AnthropicClient:
 
     @staticmethod
     def _resolve_credentials():
-        """Return (api_key, auth_token). Prefers explicit env vars; falls back to
-        the macOS Keychain OAuth token for subscription/OAuth-authenticated users."""
+        """Return (api_key, auth_token, base_url_override).
+
+        Resolution order:
+        1. HOOKS_LLM_URL + HOOKS_LLM_AUTH_TOKEN, both required together (an
+           unset or empty value on either side means neither is used, falling
+           through to the next tier). This is an explicit, portable
+           configuration a user sets themselves - e.g. via a Claude Code
+           settings.json "env" block - naming exactly which endpoint and
+           credential hooks should use. It takes priority over everything
+           else precisely because it's explicit rather than discovered.
+        2. ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN env vars, if either is set.
+        3. On macOS, the OAuth access token Claude Code itself stores in the
+           login Keychain - a fallback for subscription/OAuth-authenticated
+           users who haven't configured either of the above.
+        """
+        hooks_llm_url = os.environ.get("HOOKS_LLM_URL")
+        hooks_llm_auth_token = os.environ.get("HOOKS_LLM_AUTH_TOKEN")
+        if hooks_llm_url and hooks_llm_auth_token:
+            return None, hooks_llm_auth_token, hooks_llm_url
+
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         auth_token = os.environ.get("ANTHROPIC_AUTH_TOKEN")
         if api_key or auth_token:
-            return api_key, auth_token
-        return None, _read_macos_keychain_oauth_token()
+            return api_key, auth_token, None
+
+        return None, _read_macos_keychain_oauth_token(), None
 
     @staticmethod
     def has_credentials() -> bool:
-        """Whether any usable credential (env var or Keychain fallback) is available."""
-        api_key, auth_token = AnthropicClient._resolve_credentials()
+        """Whether any usable credential (HOOKS_LLM_*, ANTHROPIC_* env var, or
+        Keychain fallback) is available."""
+        api_key, auth_token, _ = AnthropicClient._resolve_credentials()
         return bool(api_key or auth_token)
 
     @classmethod
     def from_env(cls, timeout=60) -> "AnthropicClient":
-        """Build a client from ANTHROPIC_* environment variables, falling back to
-        the macOS Keychain OAuth token when neither env var is set."""
-        api_key, auth_token = cls._resolve_credentials()
+        """Build a client from HOOKS_LLM_*/ANTHROPIC_* environment variables,
+        falling back to the macOS Keychain OAuth token when none are set.
+
+        A HOOKS_LLM_URL override takes the base_url slot outright (ignoring
+        ANTHROPIC_BASE_URL) since it only ever resolves paired with
+        HOOKS_LLM_AUTH_TOKEN - the two travel together as one explicit
+        endpoint+credential configuration, not independent settings.
+        """
+        api_key, auth_token, base_url_override = cls._resolve_credentials()
         return cls(
-            base_url=os.environ.get("ANTHROPIC_BASE_URL"),
+            base_url=base_url_override or os.environ.get("ANTHROPIC_BASE_URL"),
             api_key=api_key,
             auth_token=auth_token,
             timeout=timeout,
