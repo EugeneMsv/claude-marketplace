@@ -1,0 +1,411 @@
+"""Tests for security-judge.py hook."""
+
+import importlib.util
+import io
+import json
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+
+HOOK_DIR = Path(__file__).parent.parent
+sys.path.insert(0, str(HOOK_DIR))
+
+
+def _load_hook_module():
+    """Load security-judge.py via importlib (hyphen in name)."""
+    hook_path = HOOK_DIR / "security-judge.py"
+    spec = importlib.util.spec_from_file_location("security_judge", hook_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+judge = _load_hook_module()
+
+
+@pytest.fixture(autouse=True)
+def _redirect_log(monkeypatch, tmp_path):
+    """Keep decision-log writes inside tmp_path instead of the real ~/.claude dir."""
+    monkeypatch.setattr(judge, "LOG_PATH", tmp_path / "decisions.jsonl")
+
+
+def _log_lines():
+    if not judge.LOG_PATH.exists():
+        return []
+    return [json.loads(line) for line in judge.LOG_PATH.read_text().splitlines() if line]
+
+
+# --- resolve_model -----------------------------------------------------------
+
+
+def test_resolveModel_envVarSet_usesEnvValue():
+    env = {"ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6"}
+
+    assert judge.resolve_model(env) == "claude-sonnet-4-6"
+
+
+def test_resolveModel_envVarUnset_usesDefault():
+    assert judge.resolve_model({}) == "claude-sonnet-5"
+
+
+# --- resolve_watched_patterns -------------------------------------------------
+
+
+def test_resolveWatchedPatterns_unset_defaultsToPython3():
+    assert judge.resolve_watched_patterns({}) == ("python3*",)
+
+
+def test_resolveWatchedPatterns_emptyString_coversNothing():
+    assert judge.resolve_watched_patterns({judge.WATCHED_COMMANDS_ENV_VAR: ""}) == ()
+
+
+def test_resolveWatchedPatterns_commaSeparatedList_parsesEachEntry():
+    env = {judge.WATCHED_COMMANDS_ENV_VAR: "python3, git push , npm install"}
+
+    assert judge.resolve_watched_patterns(env) == ("python3*", "git push*", "npm install*")
+
+
+def test_resolveWatchedPatterns_entryWithExplicitStar_usedAsIs():
+    env = {judge.WATCHED_COMMANDS_ENV_VAR: "python3 -m *"}
+
+    assert judge.resolve_watched_patterns(env) == ("python3 -m *",)
+
+
+# --- segment_commands ---------------------------------------------------------
+
+
+def test_segmentCommands_plainCommand_returnsSingleSegment():
+    assert judge.segment_commands("python3 -c 'print(1)'") == ["python3 -c print(1)"]
+
+
+def test_segmentCommands_pipedCommand_returnsTwoSegments():
+    assert judge.segment_commands("cat data.json | python3 -") == ["cat data.json", "python3 -"]
+
+
+def test_segmentCommands_chainedCommand_returnsTwoSegments():
+    assert judge.segment_commands("build.sh && python3 test.py") == ["build.sh", "python3 test.py"]
+
+
+def test_segmentCommands_sudoPrefixed_skipsWrapperToken():
+    assert judge.segment_commands("sudo python3 x.py") == ["python3 x.py"]
+
+
+def test_segmentCommands_envAssignmentPrefixed_skipsAssignmentToken():
+    assert judge.segment_commands("FOO=bar python3 x.py") == ["python3 x.py"]
+
+
+def test_segmentCommands_quotedPipeInArgument_notTreatedAsBoundary():
+    assert judge.segment_commands("python3 -c \"print('a|b')\"") == ["python3 -c print('a|b')"]
+
+
+def test_segmentCommands_unbalancedQuote_fallsBackToWholeString():
+    assert judge.segment_commands('python3 -c "unterminated') == ['python3 -c "unterminated']
+
+
+def test_segmentCommands_emptyCommand_returnsEmptyList():
+    assert judge.segment_commands("") == []
+
+
+# --- is_watched_command --------------------------------------------------------
+
+
+def test_isWatchedCommand_matchesSecondSegment_returnsTrue():
+    assert judge.is_watched_command("cat data.json | python3 -", ("python3*",)) is True
+
+
+def test_isWatchedCommand_noPatterns_returnsFalse():
+    assert judge.is_watched_command("python3 x.py", ()) is False
+
+
+def test_isWatchedCommand_trailingFlagsOnDefaultPrefix_matches():
+    assert judge.is_watched_command("python3 -m http.server 8000", ("python3*",)) is True
+
+
+def test_isWatchedCommand_noSegmentMatches_returnsFalse():
+    assert judge.is_watched_command("ls -la", ("python3*",)) is False
+
+
+# --- load_reference_bash_rules --------------------------------------------------
+
+
+def test_loadReferenceBashRules_missingFile_returnsEmptyLists(tmp_path):
+    result = judge.load_reference_bash_rules(tmp_path / "does-not-exist.json")
+
+    assert result == {"allow": [], "ask": [], "deny": []}
+
+
+def test_loadReferenceBashRules_malformedJson_returnsEmptyLists(tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text("{not valid json")
+
+    result = judge.load_reference_bash_rules(settings_path)
+
+    assert result == {"allow": [], "ask": [], "deny": []}
+
+
+def test_loadReferenceBashRules_mixedBashAndNonBashEntries_filtersToOnlyBash(tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "permissions": {
+                    "allow": ["Bash(git status)", "Edit(*.py)"],
+                    "ask": ["Bash(git push *)", "mcp__foo__bar"],
+                    "deny": ["Bash(rm -rf *)"],
+                }
+            }
+        )
+    )
+
+    result = judge.load_reference_bash_rules(settings_path)
+
+    assert result == {
+        "allow": ["Bash(git status)"],
+        "ask": ["Bash(git push *)"],
+        "deny": ["Bash(rm -rf *)"],
+    }
+
+
+def test_loadReferenceBashRules_emptyPermissionLists_returnsEmptyLists(tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({"permissions": {"allow": [], "ask": [], "deny": []}}))
+
+    result = judge.load_reference_bash_rules(settings_path)
+
+    assert result == {"allow": [], "ask": [], "deny": []}
+
+
+def test_loadReferenceBashRules_noPermissionsKey_returnsEmptyLists(tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({"someOtherKey": True}))
+
+    result = judge.load_reference_bash_rules(settings_path)
+
+    assert result == {"allow": [], "ask": [], "deny": []}
+
+
+# --- run() integration ---------------------------------------------------------
+
+
+class _StubClient:
+    """Fake AnthropicClient instance with a configurable complete_with_tool() result."""
+
+    def __init__(self, result=None, raises=None):
+        self.result = result
+        self.raises = raises
+        self.received = None
+
+    def complete_with_tool(self, model, prompt, tool_name, tool_description, input_schema, max_tokens):
+        self.received = {
+            "model": model,
+            "prompt": prompt,
+            "tool_name": tool_name,
+            "tool_description": tool_description,
+            "input_schema": input_schema,
+            "max_tokens": max_tokens,
+        }
+        if self.raises is not None:
+            raise self.raises
+        return self.result
+
+
+def _stub_anthropic_client(has_credentials, client_instance=None):
+    """Build a stand-in AnthropicClient class with static has_credentials/from_env."""
+
+    class Stub:
+        @staticmethod
+        def has_credentials():
+            return has_credentials
+
+        @staticmethod
+        def from_env():
+            return client_instance
+
+    return Stub
+
+
+def _hook_input(command, tool_name="Bash", session_id="sess-1", cwd="/tmp/project"):
+    return json.dumps(
+        {
+            "hook_event_name": "PermissionRequest",
+            "tool_name": tool_name,
+            "tool_input": {"command": command},
+            "session_id": session_id,
+            "cwd": cwd,
+        }
+    )
+
+
+@pytest.fixture(autouse=True)
+def _redirect_settings_path(monkeypatch, tmp_path):
+    """Reference-rules loading is covered by its own dedicated tests above -
+    point run()'s no-arg call at a non-existent settings.json (resolves to
+    empty rule lists, per load_reference_bash_rules' own missing-file
+    behavior) so run() tests don't depend on the real environment's file."""
+    monkeypatch.setattr(judge, "SETTINGS_PATH", tmp_path / "does-not-exist-settings.json")
+
+
+def test_run_allowDecision_returnsAllowBehaviorAndLogsDecided(monkeypatch):
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "pure computation"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    result = judge.run(_hook_input("python3 -c 'print(1)'"))
+
+    assert result == {
+        "hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": {"behavior": "allow", "message": "pure computation"},
+        }
+    }
+    [record] = _log_lines()
+    assert record["outcome"] == "decided"
+    assert record["decision"] == "allow"
+
+
+def test_run_askDecision_returnsAskBehaviorWithMessage(monkeypatch):
+    stub_client = _StubClient(result={"decision": "ask", "reasoning": "opens a local listener"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    result = judge.run(_hook_input("python3 -m http.server 8000"))
+
+    assert result["hookSpecificOutput"]["decision"] == {
+        "behavior": "ask",
+        "message": "opens a local listener",
+    }
+
+
+def test_run_denyDecision_returnsDenyBehaviorWithMessage(monkeypatch):
+    stub_client = _StubClient(result={"decision": "deny", "reasoning": "deletes filesystem root"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    result = judge.run(_hook_input("python3 -c \"import shutil; shutil.rmtree('/')\""))
+
+    assert result["hookSpecificOutput"]["decision"] == {
+        "behavior": "deny",
+        "message": "deletes filesystem root",
+    }
+
+
+def test_run_malformedJson_returnsEmptyAndLogsError(monkeypatch):
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True))
+
+    result = judge.run("{not valid json")
+
+    assert result == {}
+    [record] = _log_lines()
+    assert record["outcome"] == "error"
+    assert record["error"] == "malformed_json"
+
+
+def test_run_nonBashTool_returnsEmptyAndLogsSkipUnsupportedTool(monkeypatch):
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True))
+
+    result = judge.run(_hook_input("ls -la", tool_name="Read"))
+
+    assert result == {}
+    [record] = _log_lines()
+    assert record["outcome"] == "skip_unsupported_tool"
+
+
+def test_run_emptyCommand_returnsEmptyAndLogsSkipEmptyCommand(monkeypatch):
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True))
+
+    result = judge.run(_hook_input("   "))
+
+    assert result == {}
+    [record] = _log_lines()
+    assert record["outcome"] == "skip_empty_command"
+
+
+def test_run_unwatchedCommand_returnsEmptyAndLogsSkipUnwatchedCommand(monkeypatch):
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True))
+    monkeypatch.delenv(judge.WATCHED_COMMANDS_ENV_VAR, raising=False)
+
+    result = judge.run(_hook_input("ls -la"))
+
+    assert result == {}
+    [record] = _log_lines()
+    assert record["outcome"] == "skip_unwatched_command"
+
+
+def test_run_noCredentials_returnsEmptyAndLogsSkipNoCredentials(monkeypatch):
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(False))
+
+    result = judge.run(_hook_input("python3 -c 'print(1)'"))
+
+    assert result == {}
+    [record] = _log_lines()
+    assert record["outcome"] == "skip_no_credentials"
+
+
+def test_run_llmRaises_returnsEmptyAndLogsError(monkeypatch):
+    stub_client = _StubClient(raises=RuntimeError("boom"))
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    result = judge.run(_hook_input("python3 -c 'print(1)'"))
+
+    assert result == {}
+    [record] = _log_lines()
+    assert record["outcome"] == "error"
+    assert "boom" in record["error"]
+
+
+def test_run_invalidDecisionValue_returnsEmptyAndLogsError(monkeypatch):
+    stub_client = _StubClient(result={"decision": "maybe", "reasoning": "unsure"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    result = judge.run(_hook_input("python3 -c 'print(1)'"))
+
+    assert result == {}
+    [record] = _log_lines()
+    assert record["outcome"] == "error"
+    assert "maybe" in record["error"]
+
+
+def test_run_watchedCommand_sendsCommandAndCwdInPrompt(monkeypatch):
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "safe"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    judge.run(_hook_input("python3 train_model.py", cwd="/Users/dev/project"))
+
+    assert "python3 train_model.py" in stub_client.received["prompt"]
+    assert "/Users/dev/project" in stub_client.received["prompt"]
+    assert stub_client.received["tool_name"] == judge.TOOL_NAME
+    assert stub_client.received["input_schema"] == judge.INPUT_SCHEMA
+
+
+def _run_main(hook_input: dict, monkeypatch, capsys) -> dict:
+    stdin = io.StringIO(json.dumps(hook_input))
+    monkeypatch.setattr(sys, "stdin", stdin)
+    judge.main()
+    return json.loads(capsys.readouterr().out)
+
+
+def test_main_happyPath_writesDecisionJsonToStdout(monkeypatch, capsys):
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "safe"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+    hook_input = {
+        "hook_event_name": "PermissionRequest",
+        "tool_name": "Bash",
+        "tool_input": {"command": "python3 -c 'print(1)'"},
+        "session_id": "sess-1",
+        "cwd": "/tmp",
+    }
+
+    result = _run_main(hook_input, monkeypatch, capsys)
+
+    assert result["hookSpecificOutput"]["decision"]["behavior"] == "allow"
+
+
+def test_main_unexpectedExceptionInRun_stillPrintsEmptyJson(monkeypatch, capsys):
+    def _raise(*args, **kwargs):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(judge, "run", _raise)
+    monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
+
+    judge.main()
+
+    assert json.loads(capsys.readouterr().out) == {}
