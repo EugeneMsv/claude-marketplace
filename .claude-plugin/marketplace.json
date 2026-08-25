@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "version": "0.1.29",
+  "version": "0.1.30",
   "name": "eug-msv-claude-marketplace",
   "description": "Plugin marketplace for Claude Code from Eugene Moiseev",
   "updated": "2026-08-25",
@@ -83,7 +83,7 @@
       "name": "code-sentinel",
       "source": "./plugins/code-sentinel",
       "description": "Code Sentinel — expert code review with flow diagrams and interactive MR comment resolution",
-      "version": "0.1.3",
+      "version": "0.1.4",
       "author": {
         "name": "Eugene Moiseev"
       },
@@ -118,7 +118,7 @@
       "name": "bash-brief",
       "source": "./plugins/bash-brief",
       "description": "Bash Brief — before every Bash or MCP tool approval prompt, adds a one-sentence, high-level technical description of what it does",
-      "version": "0.1.15",
+      "version": "0.1.16",
       "author": {
         "name": "Eugene Moiseev"
       },

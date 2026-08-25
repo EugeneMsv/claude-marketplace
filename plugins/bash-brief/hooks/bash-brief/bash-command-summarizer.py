@@ -142,17 +142,16 @@ line-number targets, and prints each match's comment body.
 
 Example command: MCP tool `mcp__trino__execute_query` invoked with parameters: \
 {{"query": "SELECT status, count(*) FROM orders WHERE created_at > '2026-01-01' GROUP BY status LIMIT 20"}}
-Example output: Runs a Trino SQL query via MCP counting orders by status for orders \
+Example output: Runs a SQL counting orders by status for orders \
 created after 2026-01-01, limited to 20 rows.
 
 Example command: MCP tool `mcp__grafana__query_metrics` invoked with parameters: \
 {{"metric": "cpu_usage_percent", "service": "api-gateway", "from": "now-1h", "to": "now"}}
-Example output: Queries the api-gateway service's cpu_usage_percent metric via Grafana \
-MCP for the last hour.
+Example output: Queries the api-gateway service's cpu_usage_percent metric for the last hour.
 
 Example command: MCP tool `mcp__atlassian__getConfluencePage` invoked with parameters: \
 {{"pageId": "123456", "cloudId": "example.atlassian.net"}}
-Example output: Fetches Confluence page 123456 via MCP from the example.atlassian.net site.
+Example output: Fetches Confluence page 123456 from the example.atlassian.net site.
 
 Input:
 {command}
