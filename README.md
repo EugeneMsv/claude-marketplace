@@ -16,6 +16,7 @@ marketplace/
     ├── claude-code-guide/
     ├── code-sentinel/
     ├── feedback-loop/
+    ├── permissions-juditor/
     ├── plan-guard/
     └── task-seeder/
 ```
@@ -50,13 +51,13 @@ Enforces use of official Claude Code docs before answering any questions about C
 
 ### feedback-loop
 
-Monitors tool usage and failures, then helps refine permissions, rules, and memory files based on real usage data.
+Monitors tool usage, prompts, and failures, then helps refine permissions, rules, and memory files based on real usage data.
 
 **Skills:** `tool-permission-refiner`, `tool-rules-refiner`, `memory-refiner`
 
-**Hooks:** `tool-detector` (PreToolUse), `fail-detector` (PostToolUseFailure)
+**Hooks:** `tool-detector` (PreToolUse), `prompt-detector` (UserPromptSubmit), `fail-detector` (PostToolUseFailure)
 
-**Data directory:** `~/.claude/feedback-loop/` — `tool-detector.jsonl`, `fails.jsonl`
+**Data directory:** `~/.claude/feedback-loop/` — `tool-detector-YYYY-MM.jsonl`, `prompt-detector-YYYY-Www.jsonl`, `fails.jsonl`
 
 **[Full Documentation →](plugins/feedback-loop/README.md)**
 
@@ -81,6 +82,18 @@ Expert code review with layer-by-layer flow diagrams, model diff trees, and inte
 **Skills:** `code-review`, `mr-nitpick-sentinel`
 
 **[Full Documentation →](plugins/code-sentinel/README.md)**
+
+---
+
+### permissions-juditor
+
+Before a Bash permission prompt is shown, calls Sonnet with a security-classification prompt and lets it decide allow (auto-clear), ask (prompt proceeds, with reasoning attached), or deny (blocked). Scope is controlled by the `PERMISSIONS_JUDITOR_WATCHED_COMMANDS` env var (defaults to `python3`; `""` disables the plugin entirely) and is segment-aware via `shlex`, so a watched command behind a pipe, chain, `sudo`, or env-assignment prefix is still detected.
+
+**Hooks:** `security-judge` (`PermissionRequest`, `Bash`)
+
+**Data directory:** `~/.claude/permissions-juditor/` — `decisions.jsonl` (one line per invocation, always on)
+
+**[Full Documentation →](plugins/permissions-juditor/README.md)**
 
 ---
 

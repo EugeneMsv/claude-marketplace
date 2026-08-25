@@ -1,0 +1,82 @@
+# permissions-juditor
+
+Before Claude Code shows you a permission prompt for a Bash command, calls Sonnet with a purpose-written security-classification prompt and lets it decide `allow` (auto-clear, no prompt), `ask` (prompt proceeds, with the model's reasoning attached), or `deny` (blocked, with a reason) — so genuinely safe commands stop interrupting you, while risky ones still get a human decision or are stopped outright.
+
+## What It Does
+
+### Hooks
+
+| Hook | Event | Purpose |
+|---|---|---|
+| `security-judge` | `PermissionRequest` (`Bash`) | Fires only when Claude Code actually needs a permission decision for a Bash command — never for commands an existing `allow` rule already covers. Classifies watched commands via a forced Sonnet tool call and maps the result to a `PermissionRequest` decision. |
+
+### Scope: env-var controlled, not config-bound
+
+`hooks.json` matches every `Bash` `PermissionRequest` — it does not filter by command prefix. Actual scope is controlled entirely inside `security-judge.py`, via `PERMISSIONS_JUDITOR_WATCHED_COMMANDS`:
+
+| Value | Effect |
+|---|---|
+| *(unset)* | Default: covers `python3` only |
+| `python3,git push,npm install` | Comma-separated list — covers exactly those, each entry auto-suffixed with `*` if it has none |
+| `` *(empty string)* | Covers nothing — a live kill switch for the whole plugin |
+| `python3 -m *` | An entry already containing `*` is used exactly as written, for a narrower match |
+
+Because this lives in the script rather than `hooks.json`, changing scope takes effect on the very next Bash call — no plugin edit, no `hooks.json` edit, and no Claude Code restart (unlike `hooks.json` itself, which is only read at session start).
+
+### Matching is segment-aware, not whole-string
+
+A command like `cat data.json | python3 -` or `sudo python3 x.py` has `python3` as the *second* command, not the first token of the whole string. `security-judge.py` uses `shlex` (stdlib, no new dependency) with `punctuation_chars=True` to tokenize the command, splits it into pipeline/chain segments on `|`/`&`/`;`/`(`/`)`, skips a leading `VAR=value` assignment or a wrapper (`sudo`/`time`/`nice`/`nohup`) in each segment, and glob-matches every segment against the watched patterns. A pipe character inside a quoted argument (`python3 -c "print('a|b')"`) is correctly kept as part of that one token, not mistaken for a real pipeline boundary.
+
+**Known ceiling:** `shlex` is a lexer, not a shell grammar parser. `$(...)` command substitution, here-docs, and control-flow keywords (`if`/`for`/`while`) can still hide a watched command from detection. A narrow custom pattern like `python3 -m *` also won't match if flags are reordered or inserted before `-m` (e.g. `python3 -u -m foo`) — that's a property of glob matching itself, unrelated to segmentation, and doesn't affect the plain `python3` default entry.
+
+### Reference rules from your own settings — non-binding except deny
+
+The classification prompt embeds your existing `~/.claude/settings.json` `permissions.allow`/`ask`/`deny` rules, filtered to `Bash`-prefixed entries only. The model is explicitly instructed:
+
+- **Deny rules are authoritative** — a match (or functional equivalent) forces `deny`.
+- **Ask and allow rules are context only**, not a rulebook to replicate — the model is told to prefer `allow` when genuinely confident a command is safe, even if a static `ask` rule would have caught it, but never to stretch to `allow` out of real uncertainty. Security comes first; reducing prompts is the secondary goal.
+
+### Decision policy
+
+- **allow** — safe/read-only/benign local operations: pure computation, printing, reading files you already have, running your own scripts.
+- **ask** — genuinely ambiguous, or a real-but-bounded side effect worth a glance: writing local files, installing packages, opening a local network listener.
+- **deny** — destructive, exfiltrates data, escalates privileges, disables security controls, obfuscates its own behavior, or targets credentials/sensitive paths.
+
+The full prompt (including few-shot examples) lives in `PROMPT_TEMPLATE` in `security-judge.py` and is easily edited.
+
+## Model Resolution
+
+1. `ANTHROPIC_DEFAULT_SONNET_MODEL` — if set, used as-is (useful on Bedrock/Vertex deployments where the bare alias may not be enabled).
+2. `claude-sonnet-5` — the undated alias, used when the env var above is unset.
+
+## Credential Resolution
+
+This hook calls the public Messages API directly via the shared `anthropic_client.py`, so it needs a credential of its own:
+
+1. `HOOKS_LLM_URL` + `HOOKS_LLM_AUTH_TOKEN`, both required together — an explicit, portable endpoint+credential configuration you set yourself (e.g. via a `env` block in `~/.claude/settings.json`), naming exactly which endpoint and bearer token every hook using the shared client should call. Takes priority over everything below, and doesn't depend on Claude Code's internal, undocumented Keychain storage format. Setting only one of the two is treated as neither being set.
+2. `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` env vars, if either is set.
+3. On macOS, the OAuth access token Claude Code itself stores in the login Keychain under the service name `Claude Code-credentials` — used only if unexpired. This lets subscription/OAuth-authenticated users get a working hook without exporting a separate credential.
+
+If none resolve, the hook silently no-ops (logged as `skip_no_credentials`) rather than prompting for a key.
+
+## Failure Handling
+
+Missing credentials, network errors, malformed hook input, an unwatched command, or an unexpected/invalid model response all fall through to `{}` — no decision override. The Bash call proceeds through Claude Code's normal permission flow exactly as if this plugin weren't installed; this hook is never the reason a command is blocked or delayed beyond the model call itself.
+
+## Decision Log
+
+Every invocation — not just the ones that reach a real classification — appends one JSONL line to `~/.claude/permissions-juditor/decisions.jsonl`:
+
+```json
+{"timestamp": "2026-08-24T15:44:23", "session_id": "...", "command": "python3 -c \"print(1)\"", "cwd": "/path", "outcome": "decided", "decision": "allow", "reasoning": "Pure computation with no I/O."}
+```
+
+`outcome` is one of `decided`, `skip_unwatched_command`, `skip_no_credentials`, `skip_unsupported_tool`, `skip_empty_command`, or `error` (with an `error` field describing what failed). This is the plugin's audit trail — always on, not gated behind a debug flag.
+
+## Installation
+
+```bash
+claude plugin install permissions-juditor@eug-msv-claude-marketplace
+```
+
+Hooks load only at session start — restart Claude Code after installing or after changing `hooks.json` for the change to take effect. Changing `PERMISSIONS_JUDITOR_WATCHED_COMMANDS` does not require a restart.

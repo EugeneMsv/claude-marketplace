@@ -1,0 +1,17 @@
+{
+  "description": "Bash Brief — annotates Bash commands and MCP tool invocations with a one-sentence technical summary before the approval decision",
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "matcher": "Bash|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/bash-brief/bash-command-summarizer.py",
+            "timeout": 12
+          }
+        ]
+      }
+    ]
+  }
+}

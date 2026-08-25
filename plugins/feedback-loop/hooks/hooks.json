@@ -1,6 +1,17 @@
 {
-  "description": "Feedback Loop — logs tool usage and failures for permission and rule refinement",
+  "description": "Feedback Loop — logs tool usage, prompts, and failures for permission and rule refinement",
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/feedback-loop/prompt-detector.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": ".*",

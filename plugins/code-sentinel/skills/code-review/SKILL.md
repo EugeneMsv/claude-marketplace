@@ -101,6 +101,19 @@ both sub-steps before producing flow diagrams or model diff trees.
         - Architectural changes
         - Algorithm updates
         - Configuration changes (lowest priority)
+    - Immediately after listing the prioritized changes, print a concise reading-order suggestion
+      per changed flow so the reviewer can traverse the MR sequentially instead of jumping between
+      findings — a statement, not a question to wait on. Identified per flow from the entry
+      points found in 5.2, not one fixed direction for the whole MR:
+        - **Top-down**: start at the flow's entry point (REST endpoint, message topic, scheduled
+          job — the natural "top") and read down through the layer transitions into the
+          components it touches, same direction as the 5.2 diagram
+        - **Bottom-up**: start at the innermost changed component (e.g. a shared calculator,
+          validator, or model/DTO from 5.3) and read outward to the entry point(s) that invoke it
+        - MUST print both options concisely for each changed flow (one line each: what to read
+          first, what follows) — do not pick one and omit the other
+        - If several flows changed, say so and give both options per flow — they may not all
+          suit the same traversal
 
 7. **Review Each Major Change**
 
