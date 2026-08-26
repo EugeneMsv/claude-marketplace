@@ -92,17 +92,27 @@ Command:
 Reference — this environment's existing Bash permission rules, from its Claude Code settings
 (context only, see "How to use this reference" below):
 - Deny rules: {deny_rules}
+  Additional deny-leaning suggestion, from this environment's own auto-mode policy: {hard_deny}
 - Ask rules: {ask_rules}
+  Additional ask-leaning suggestion, from this environment's own auto-mode policy: {soft_deny}
 - Allow rules: {allow_rules}
+  Additional allow-leaning suggestion, from this environment's own auto-mode policy: {auto_allow}
+
+Environment context (org, infra, prod/non-prod heuristics), useful for resolving whether a
+hostname, GCP project, login-path, or file path named in the command is production or
+non-production: {environment}
 
 How to use this reference:
-- Deny rules are authoritative: if the command matches, or does something functionally
-equivalent to, any deny rule above, your decision MUST be "deny".
-- Ask and allow rules are NOT a rulebook to replicate. Do not look up whether the command
-happens to match an ask rule and default to "ask" because of that alone. Judge the command on
-its actual merits using the policy below - our aim is to reduce unnecessary interruptions, so
-prefer "allow" whenever you are genuinely confident the command is safe, even if a static ask
-rule would otherwise have caught it.
+- Deny rules AND their additional suggestion are authoritative: if the command matches, or does
+something functionally equivalent to, either one, your decision MUST be "deny".
+- Ask rules AND their additional suggestion are authoritative for "ask": if the command matches,
+or does something functionally equivalent to, either one, your decision MUST be "ask" at
+minimum - never "allow" on that basis alone, even if the command would otherwise look safe.
+- Allow rules and their additional suggestion are NOT a rulebook to replicate. Do not look up
+whether the command happens to match an ask rule and default to "ask" because of that alone.
+Judge the command on its actual merits using the policy below - our aim is to reduce unnecessary
+interruptions, so prefer "allow" whenever you are genuinely confident the command is safe, even
+if a static ask rule would otherwise have caught it.
 - Security still comes first: this leniency only applies when you are actually confident.
 Real uncertainty or any concrete risk factor still means "ask" or "deny" - never stretch to
 "allow" just to avoid prompting the user.
@@ -234,11 +244,13 @@ def is_watched_command(command: str, patterns: tuple[str, ...]) -> bool:
     )
 
 
-def load_reference_bash_rules(settings_path: Path | None = None) -> dict:
-    """Read settings_path's permissions.allow/ask/deny, filtered to Bash-prefixed
-    entries. Never raises: missing file, missing key, or malformed JSON all
-    resolve to empty lists - this is reference context for the prompt, not a
-    required input the hook depends on to function.
+def _read_settings_json(settings_path: Path | None = None) -> dict:
+    """Read and parse settings_path as a JSON object, or {} on any failure.
+
+    Never raises: missing file, unreadable file, or malformed JSON all
+    resolve to {}. Shared by load_reference_bash_rules() and
+    load_auto_mode_context(), both of which treat settings.json as optional
+    reference context rather than a required input.
 
     settings_path defaults to the module-level SETTINGS_PATH, looked up by
     name at call time (not bound as a default argument value) so tests can
@@ -249,8 +261,16 @@ def load_reference_bash_rules(settings_path: Path | None = None) -> dict:
     try:
         data = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
-        data = {}
-    permissions = data.get("permissions") if isinstance(data, dict) else None
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def load_reference_bash_rules(settings_path: Path | None = None) -> dict:
+    """Read settings_path's permissions.allow/ask/deny, filtered to Bash-prefixed
+    entries. Never raises - this is reference context for the prompt, not a
+    required input the hook depends on to function.
+    """
+    permissions = _read_settings_json(settings_path).get("permissions")
     permissions = permissions if isinstance(permissions, dict) else {}
 
     result: dict[str, list[str]] = {}
@@ -261,18 +281,64 @@ def load_reference_bash_rules(settings_path: Path | None = None) -> dict:
     return result
 
 
+# Placeholder Claude Code substitutes for its own built-in default entries at
+# runtime - meaningless as literal prompt text, filtered out before use.
+AUTO_MODE_DEFAULTS_PLACEHOLDER = "$defaults"
+AUTO_MODE_KEYS = ("environment", "allow", "soft_deny", "hard_deny")
+
+
+def load_auto_mode_context(settings_path: Path | None = None) -> dict:
+    """Read settings_path's autoMode section - the environment/allow/soft_deny/
+    hard_deny prose lists Claude Code's own auto-mode classifier uses - for
+    extra context on this deployment's org, infra, and desired policy.
+
+    Never raises: missing file, missing key, or malformed JSON all resolve to
+    empty lists - reference context, not a required input. The literal
+    "$defaults" placeholder entry (Claude Code's own built-in-defaults marker,
+    meaningless outside its own classifier) is filtered out of every list.
+    """
+    auto_mode = _read_settings_json(settings_path).get("autoMode")
+    auto_mode = auto_mode if isinstance(auto_mode, dict) else {}
+
+    result: dict[str, list[str]] = {}
+    for key in AUTO_MODE_KEYS:
+        entries = auto_mode.get(key)
+        entries = entries if isinstance(entries, list) else []
+        result[key] = [
+            e for e in entries if isinstance(e, str) and e != AUTO_MODE_DEFAULTS_PLACEHOLDER
+        ]
+    return result
+
+
 def _format_rule_list(rules: list[str]) -> str:
     return ", ".join(rules) if rules else "(none configured)"
 
 
-def build_prompt(command: str, cwd: str, reference_rules: dict) -> str:
+def _format_prose_list(entries: list[str]) -> str:
+    """Semicolon-joined for multi-sentence policy prose - unlike
+    _format_rule_list's comma join, these entries often contain their own
+    commas (e.g. "projects: a, b"), so ", " would blur where one entry ends
+    and the next begins."""
+    return "; ".join(entries) if entries else "(none configured)"
+
+
+def build_prompt(command: str, cwd: str, reference_rules: dict, auto_mode: dict) -> str:
     return PROMPT_TEMPLATE.format(
         cwd=cwd,
         command=command[:MAX_COMMAND_CHARS],
         deny_rules=_format_rule_list(reference_rules["deny"]),
         ask_rules=_format_rule_list(reference_rules["ask"]),
         allow_rules=_format_rule_list(reference_rules["allow"]),
+        environment=_format_prose_list(auto_mode["environment"]),
+        auto_allow=_format_prose_list(auto_mode["allow"]),
+        soft_deny=_format_prose_list(auto_mode["soft_deny"]),
+        hard_deny=_format_prose_list(auto_mode["hard_deny"]),
     )
+
+
+# Fields worth scanning at a glance, in display order; everything else
+# (session_id, cwd, error) follows after, in its original order.
+LOG_FIELD_ORDER = ("timestamp", "outcome", "decision", "reasoning", "command")
 
 
 def _log(record: dict) -> None:
@@ -280,10 +346,13 @@ def _log(record: dict) -> None:
     failure never suppresses the actual decision."""
     try:
         LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(
-            {"timestamp": datetime.now().isoformat(timespec="seconds"), **record},
-            ensure_ascii=False,
-        )
+        remaining = {"timestamp": datetime.now().isoformat(timespec="seconds"), **record}
+        ordered = {}
+        for key in LOG_FIELD_ORDER:
+            if key in remaining:
+                ordered[key] = remaining.pop(key)
+        ordered.update(remaining)
+        line = json.dumps(ordered, ensure_ascii=False)
         with open(LOG_PATH, "a", encoding="utf-8") as handle:
             handle.write(line + "\n")
     except (OSError, TypeError, ValueError):
@@ -315,7 +384,7 @@ def run(raw_input: str) -> dict:
     cwd = hook_input.get("cwd", "")
     command = (tool_input.get("command") or "").strip()
 
-    base = {"session_id": session_id, "command": command[:500], "cwd": cwd}
+    base = {"session_id": session_id, "command": command[:MAX_COMMAND_CHARS], "cwd": cwd}
 
     if tool_name != "Bash":
         _log({**base, "outcome": "skip_unsupported_tool"})
@@ -336,7 +405,8 @@ def run(raw_input: str) -> dict:
 
     try:
         reference_rules = load_reference_bash_rules()
-        prompt = build_prompt(command, cwd, reference_rules)
+        auto_mode = load_auto_mode_context()
+        prompt = build_prompt(command, cwd, reference_rules, auto_mode)
         result = AnthropicClient.from_env().complete_with_tool(
             model=resolve_model(),
             prompt=prompt,

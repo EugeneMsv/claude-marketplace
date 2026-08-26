@@ -36,6 +36,19 @@ The classification prompt embeds your existing `~/.claude/settings.json` `permis
 - **Deny rules are authoritative** — a match (or functional equivalent) forces `deny`.
 - **Ask and allow rules are context only**, not a rulebook to replicate — the model is told to prefer `allow` when genuinely confident a command is safe, even if a static `ask` rule would have caught it, but never to stretch to `allow` out of real uncertainty. Security comes first; reducing prompts is the secondary goal.
 
+### Auto-mode context — an additional suggestion alongside each rule
+
+If your `~/.claude/settings.json` has an `autoMode` section (the prose instructions Claude Code's own built-in auto-mode classifier uses), it's read via `load_auto_mode_context()` and attached as one extra line under each of the three rule categories above — not a separate section the model has to cross-reference on its own:
+
+| `autoMode` key | Attached under | Weight |
+|---|---|---|
+| `hard_deny` | Deny rules | Authoritative — same as a deny-rule match |
+| `soft_deny` | Ask rules | Authoritative for `ask` — same as an ask-rule match |
+| `allow` | Allow rules | Context only, same non-binding treatment as the allow rules themselves |
+| `environment` | Its own line, before "How to use this reference" | Background — used to judge whether a hostname/GCP project/login-path/path named in the command is production or non-production |
+
+The literal `"$defaults"` placeholder entry (Claude Code substitutes this for its own built-in defaults at classification time) is filtered out before the prompt is built — it would be meaningless as literal text outside Claude Code's own classifier. Missing file, missing `autoMode` key, or malformed JSON all resolve to empty lists, same fail-open behavior as the Bash-rules reference above.
+
 ### Decision policy
 
 - **allow** — safe/read-only/benign local operations: pure computation, printing, reading files you already have, running your own scripts.

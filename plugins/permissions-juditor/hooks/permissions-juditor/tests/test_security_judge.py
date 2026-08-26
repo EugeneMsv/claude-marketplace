@@ -37,6 +37,47 @@ def _log_lines():
     return [json.loads(line) for line in judge.LOG_PATH.read_text().splitlines() if line]
 
 
+# --- _log ---------------------------------------------------------------------
+
+
+def test_log_decidedRecord_ordersFieldsTimestampOutcomeDecisionReasoningCommandThenRest():
+    judge._log(
+        {
+            "session_id": "sess-1",
+            "cwd": "/tmp/project",
+            "command": "python3 -c 'print(1)'",
+            "outcome": "decided",
+            "decision": "allow",
+            "reasoning": "pure computation",
+        }
+    )
+
+    [record] = _log_lines()
+    assert list(record.keys()) == [
+        "timestamp",
+        "outcome",
+        "decision",
+        "reasoning",
+        "command",
+        "session_id",
+        "cwd",
+    ]
+
+
+def test_log_skipRecord_omitsMissingFieldsButKeepsOrderOfPresentOnes():
+    judge._log({"session_id": "sess-1", "cwd": "/tmp/project", "outcome": "skip_unwatched_command"})
+
+    [record] = _log_lines()
+    assert list(record.keys()) == ["timestamp", "outcome", "session_id", "cwd"]
+
+
+def test_log_errorRecord_errorFieldFollowsCommandFieldsAsPartOfRest():
+    judge._log({"session_id": None, "command": None, "cwd": None, "outcome": "error", "error": "malformed_json"})
+
+    [record] = _log_lines()
+    assert list(record.keys()) == ["timestamp", "outcome", "command", "session_id", "cwd", "error"]
+
+
 # --- resolve_model -----------------------------------------------------------
 
 
@@ -186,6 +227,77 @@ def test_loadReferenceBashRules_noPermissionsKey_returnsEmptyLists(tmp_path):
     assert result == {"allow": [], "ask": [], "deny": []}
 
 
+# --- load_auto_mode_context ------------------------------------------------------
+
+_EMPTY_AUTO_MODE = {"environment": [], "allow": [], "soft_deny": [], "hard_deny": []}
+
+
+def test_loadAutoModeContext_missingFile_returnsEmptyLists(tmp_path):
+    result = judge.load_auto_mode_context(tmp_path / "does-not-exist.json")
+
+    assert result == _EMPTY_AUTO_MODE
+
+
+def test_loadAutoModeContext_malformedJson_returnsEmptyLists(tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text("{not valid json")
+
+    result = judge.load_auto_mode_context(settings_path)
+
+    assert result == _EMPTY_AUTO_MODE
+
+
+def test_loadAutoModeContext_noAutoModeKey_returnsEmptyLists(tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({"someOtherKey": True}))
+
+    result = judge.load_auto_mode_context(settings_path)
+
+    assert result == _EMPTY_AUTO_MODE
+
+
+def test_loadAutoModeContext_populatedSections_returnsEachList(tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "autoMode": {
+                    "environment": ["Org: Acme Corp"],
+                    "allow": ["Read-only shell inspection is allowed"],
+                    "soft_deny": ["Never run prod ops without asking"],
+                    "hard_deny": ["Never modify prod without asking"],
+                }
+            }
+        )
+    )
+
+    result = judge.load_auto_mode_context(settings_path)
+
+    assert result == {
+        "environment": ["Org: Acme Corp"],
+        "allow": ["Read-only shell inspection is allowed"],
+        "soft_deny": ["Never run prod ops without asking"],
+        "hard_deny": ["Never modify prod without asking"],
+    }
+
+
+def test_loadAutoModeContext_defaultsPlaceholder_filteredOut(tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "autoMode": {
+                    "hard_deny": ["$defaults", "Never modify prod without asking"],
+                }
+            }
+        )
+    )
+
+    result = judge.load_auto_mode_context(settings_path)
+
+    assert result["hard_deny"] == ["Never modify prod without asking"]
+
+
 # --- run() integration ---------------------------------------------------------
 
 
@@ -262,6 +374,18 @@ def test_run_allowDecision_returnsAllowBehaviorAndLogsDecided(monkeypatch):
     [record] = _log_lines()
     assert record["outcome"] == "decided"
     assert record["decision"] == "allow"
+
+
+def test_run_watchedCommand_logsCommandUpToMaxCommandCharsNotJustFirst500(monkeypatch):
+    long_command = "python3 -c \"print('" + ("x" * 600) + "')\""
+    assert 500 < len(long_command) <= judge.MAX_COMMAND_CHARS
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "pure computation"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    judge.run(_hook_input(long_command))
+
+    [record] = _log_lines()
+    assert record["command"] == long_command
 
 
 def test_run_askDecision_returnsAskBehaviorWithMessage(monkeypatch):
@@ -374,6 +498,34 @@ def test_run_watchedCommand_sendsCommandAndCwdInPrompt(monkeypatch):
     assert "/Users/dev/project" in stub_client.received["prompt"]
     assert stub_client.received["tool_name"] == judge.TOOL_NAME
     assert stub_client.received["input_schema"] == judge.INPUT_SCHEMA
+
+
+def test_run_watchedCommand_autoModeContextIncludedInPrompt(monkeypatch, tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "autoMode": {
+                    "environment": ["$defaults", "Org: Acme Corp, ad-tech"],
+                    "hard_deny": ["Never modify prod without asking"],
+                    "soft_deny": ["Never run prod ops without asking first"],
+                    "allow": ["Read-only shell inspection is allowed"],
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(judge, "SETTINGS_PATH", settings_path)
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "safe"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    judge.run(_hook_input("python3 train_model.py"))
+
+    prompt = stub_client.received["prompt"]
+    assert "Org: Acme Corp, ad-tech" in prompt
+    assert "Never modify prod without asking" in prompt
+    assert "Never run prod ops without asking first" in prompt
+    assert "Read-only shell inspection is allowed" in prompt
+    assert "$defaults" not in prompt
 
 
 def _run_main(hook_input: dict, monkeypatch, capsys) -> dict:

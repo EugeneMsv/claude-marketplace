@@ -1,9 +1,9 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "version": "0.1.30",
+  "version": "0.1.31",
   "name": "eug-msv-claude-marketplace",
   "description": "Plugin marketplace for Claude Code from Eugene Moiseev",
-  "updated": "2026-08-25",
+  "updated": "2026-08-26",
   "owner": {
     "name": "Eugene Moiseev",
     "url": "https://github.com/EugeneMsv"
@@ -135,7 +135,7 @@
       "name": "permissions-juditor",
       "source": "./plugins/permissions-juditor",
       "description": "Permissions Juditor — Sonnet-based security classification auto-clears safe shell commands (python3 today) that would otherwise require manual approval",
-      "version": "0.1.7",
+      "version": "0.1.8",
       "author": {
         "name": "Eugene Moiseev"
       },
