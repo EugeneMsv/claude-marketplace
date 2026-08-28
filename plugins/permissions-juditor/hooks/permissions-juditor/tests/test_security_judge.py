@@ -64,6 +64,30 @@ def test_log_decidedRecord_ordersFieldsTimestampOutcomeDecisionReasoningCommandT
     ]
 
 
+def test_log_decidedRecordWithElapsedMs_ordersElapsedMsBeforeReasoning():
+    judge._log(
+        {
+            "session_id": "sess-1",
+            "command": "python3 -c 'print(1)'",
+            "outcome": "decided",
+            "decision": "allow",
+            "elapsed_ms": 842,
+            "reasoning": "pure computation",
+        }
+    )
+
+    [record] = _log_lines()
+    assert list(record.keys()) == [
+        "timestamp",
+        "outcome",
+        "decision",
+        "elapsed_ms",
+        "reasoning",
+        "command",
+        "session_id",
+    ]
+
+
 def test_log_skipRecord_omitsMissingFieldsButKeepsOrderOfPresentOnes():
     judge._log({"session_id": "sess-1", "cwd": "/tmp/project", "outcome": "skip_unwatched_command"})
 
@@ -89,6 +113,24 @@ def test_resolveModel_envVarSet_usesEnvValue():
 
 def test_resolveModel_envVarUnset_usesDefault():
     assert judge.resolve_model({}) == "claude-sonnet-5"
+
+
+# --- resolve_effort ------------------------------------------------------------
+
+
+def test_resolveEffort_envVarUnset_defaultsToMedium():
+    """Balances latency (this hook blocks the permission dialog) against
+    classification depth on adversarial/obfuscated commands."""
+    assert judge.resolve_effort({}) == "medium"
+
+
+@pytest.mark.parametrize("level", ["max", "xhigh", "high", "medium", "low"])
+def test_resolveEffort_envVarSetToValidLevel_usesEnvValue(level):
+    assert judge.resolve_effort({judge.EFFORT_ENV_VAR: level}) == level
+
+
+def test_resolveEffort_envVarSetToInvalidValue_fallsBackToMedium():
+    assert judge.resolve_effort({judge.EFFORT_ENV_VAR: "extreme"}) == "medium"
 
 
 # --- resolve_watched_patterns -------------------------------------------------
@@ -309,7 +351,10 @@ class _StubClient:
         self.raises = raises
         self.received = None
 
-    def complete_with_tool(self, model, prompt, tool_name, tool_description, input_schema, max_tokens):
+    def complete_with_tool(
+        self, model, prompt, tool_name, tool_description, input_schema, max_tokens,
+        effort=None, system=None, cache_system=False,
+    ):
         self.received = {
             "model": model,
             "prompt": prompt,
@@ -317,6 +362,9 @@ class _StubClient:
             "tool_description": tool_description,
             "input_schema": input_schema,
             "max_tokens": max_tokens,
+            "effort": effort,
+            "system": system,
+            "cache_system": cache_system,
         }
         if self.raises is not None:
             raise self.raises
@@ -332,7 +380,7 @@ def _stub_anthropic_client(has_credentials, client_instance=None):
             return has_credentials
 
         @staticmethod
-        def from_env():
+        def from_env(timeout=None):
             return client_instance
 
     return Stub
@@ -374,6 +422,8 @@ def test_run_allowDecision_returnsAllowBehaviorAndLogsDecided(monkeypatch):
     [record] = _log_lines()
     assert record["outcome"] == "decided"
     assert record["decision"] == "allow"
+    assert isinstance(record["elapsed_ms"], int)
+    assert record["elapsed_ms"] >= 0
 
 
 def test_run_watchedCommand_logsCommandUpToMaxCommandCharsNotJustFirst500(monkeypatch):
@@ -421,6 +471,25 @@ def test_run_malformedJson_returnsEmptyAndLogsError(monkeypatch):
     [record] = _log_lines()
     assert record["outcome"] == "error"
     assert record["error"] == "malformed_json"
+
+
+def test_run_defaultEnv_passesMediumEffortToCompleteWithTool(monkeypatch):
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "pure computation"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    judge.run(_hook_input("python3 -c 'print(1)'"))
+
+    assert stub_client.received["effort"] == "medium"
+
+
+def test_run_effortEnvVarSet_passesConfiguredEffort(monkeypatch):
+    monkeypatch.setenv(judge.EFFORT_ENV_VAR, "high")
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "pure computation"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    judge.run(_hook_input("python3 -c 'print(1)'"))
+
+    assert stub_client.received["effort"] == "high"
 
 
 def test_run_nonBashTool_returnsEmptyAndLogsSkipUnsupportedTool(monkeypatch):
@@ -488,19 +557,31 @@ def test_run_invalidDecisionValue_returnsEmptyAndLogsError(monkeypatch):
     assert "maybe" in record["error"]
 
 
-def test_run_watchedCommand_sendsCommandAndCwdInPrompt(monkeypatch):
+def test_run_watchedCommand_sendsCommandAndCwdInUserPromptNotSystem(monkeypatch):
+    """cwd/command are the per-call variable part - they belong in the user
+    message, never in the cacheable system block."""
     stub_client = _StubClient(result={"decision": "allow", "reasoning": "safe"})
     monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
 
-    judge.run(_hook_input("python3 train_model.py", cwd="/Users/dev/project"))
+    judge.run(_hook_input("python3 sync_inventory_ledger.py", cwd="/Users/dev/project"))
 
-    assert "python3 train_model.py" in stub_client.received["prompt"]
+    assert "python3 sync_inventory_ledger.py" in stub_client.received["prompt"]
     assert "/Users/dev/project" in stub_client.received["prompt"]
+    assert "python3 sync_inventory_ledger.py" not in stub_client.received["system"]
     assert stub_client.received["tool_name"] == judge.TOOL_NAME
     assert stub_client.received["input_schema"] == judge.INPUT_SCHEMA
 
 
-def test_run_watchedCommand_autoModeContextIncludedInPrompt(monkeypatch, tmp_path):
+def test_run_watchedCommand_cachesSystemPrompt(monkeypatch):
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "safe"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    judge.run(_hook_input("python3 train_model.py"))
+
+    assert stub_client.received["cache_system"] is True
+
+
+def test_run_watchedCommand_autoModeContextIncludedInSystemPrompt(monkeypatch, tmp_path):
     settings_path = tmp_path / "settings.json"
     settings_path.write_text(
         json.dumps(
@@ -520,12 +601,12 @@ def test_run_watchedCommand_autoModeContextIncludedInPrompt(monkeypatch, tmp_pat
 
     judge.run(_hook_input("python3 train_model.py"))
 
-    prompt = stub_client.received["prompt"]
-    assert "Org: Acme Corp, ad-tech" in prompt
-    assert "Never modify prod without asking" in prompt
-    assert "Never run prod ops without asking first" in prompt
-    assert "Read-only shell inspection is allowed" in prompt
-    assert "$defaults" not in prompt
+    system_prompt = stub_client.received["system"]
+    assert "Org: Acme Corp, ad-tech" in system_prompt
+    assert "Never modify prod without asking" in system_prompt
+    assert "Never run prod ops without asking first" in system_prompt
+    assert "Read-only shell inspection is allowed" in system_prompt
+    assert "$defaults" not in system_prompt
 
 
 def _run_main(hook_input: dict, monkeypatch, capsys) -> dict:

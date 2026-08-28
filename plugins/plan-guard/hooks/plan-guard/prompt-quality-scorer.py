@@ -38,7 +38,12 @@ def score_prompt(client: AnthropicClient, prompt_text: str) -> str:
     # ANTHROPIC_MODEL is a CLI alias ("opus"), not a real model id — resolve a concrete one.
     model = os.environ.get("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-4-6")
     return client.complete(
-        model=model, prompt=PROMPT_TEMPLATE.format(prompt=prompt_text), max_tokens=400
+        model=model,
+        prompt=PROMPT_TEMPLATE.format(prompt=prompt_text),
+        max_tokens=400,
+        # Explicit rather than relying on the client's own default, so this
+        # hook's behavior is visible here rather than inherited silently.
+        effort="medium",
     )
 
 

@@ -29,10 +29,11 @@ import json
 import os
 import shlex
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
-from anthropic_client import AnthropicClient
+from anthropic_client import AnthropicClient, EFFORT_LEVELS
 
 # --- Scope: which commands this hook actually judges -----------------------
 
@@ -59,6 +60,13 @@ SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 # --- Model + API call -------------------------------------------------------
 
 DEFAULT_MODEL = "claude-sonnet-5"
+EFFORT_ENV_VAR = "PERMISSIONS_JUDITOR_EFFORT"
+DEFAULT_EFFORT = "medium"
+
+# hooks.json sets this hook's own timeout to 25s; the API call must return
+# (or be abandoned) well before that so a slow-but-not-dead request logs as
+# an error instead of Claude Code killing the process with nothing recorded.
+API_TIMEOUT = 20
 
 TOOL_NAME = "classify_command_security"
 TOOL_DESCRIPTION = (
@@ -70,7 +78,14 @@ INPUT_SCHEMA = {
     "type": "object",
     "properties": {
         "decision": {"type": "string", "enum": ["allow", "ask", "deny"]},
-        "reasoning": {"type": "string"},
+        # Capped to one short sentence: output tokens dominate wall time on a
+        # call this small, and reasoning is nearly all of the output - see
+        # API_TIMEOUT's neighboring comment on why latency matters here.
+        "reasoning": {
+            "type": "string",
+            "description": "The specific, concrete risk factor observed (or its absence), "
+            "in one sentence of 15 words or fewer.",
+        },
     },
     "required": ["decision", "reasoning"],
     # Required by the API for a strict tool schema (HTTP 400 otherwise) - also
@@ -78,16 +93,20 @@ INPUT_SCHEMA = {
     # explicitly here too so the schema is self-documenting on its own.
     "additionalProperties": False,
 }
-MAX_TOKENS = 300
+MAX_TOKENS = 160
 MAX_COMMAND_CHARS = 4000
 
-PROMPT_TEMPLATE = """\
+# Static instructions plus reference-rules context, sent as the request's
+# system block rather than folded into the user message. It's
+# byte-identical across repeated calls within a session unless settings.json
+# changes, which is exactly what makes it worth marking cache_control:
+# ephemeral (see build_system_prompt/CACHE_SYSTEM below) - every call after
+# the first one reads it from cache instead of paying full input-token cost
+# and latency on it again. Below the model's ~1,024-token cache minimum this
+# marker is simply a no-op, not an error.
+SYSTEM_TEMPLATE = """\
 You are a security judge deciding whether a shell command should run without human review,
 should be reviewed by a human before running, or should be blocked outright.
-
-Working directory: {cwd}
-Command:
-{command}
 
 Reference — this environment's existing Bash permission rules, from its Claude Code settings
 (context only, see "How to use this reference" below):
@@ -161,7 +180,15 @@ Decision: allow
 Reasoning: Runs the user's own local script against a local config file; no indication of
 destructive or exfiltrating behavior.
 
-Now classify the command above by calling the classify_command_security tool.
+Now classify the command given in this message by calling the classify_command_security tool.
+"""
+
+# The variable part of every call - cwd and the command itself - kept out of
+# SYSTEM_TEMPLATE specifically so it never becomes part of a cached prefix.
+USER_TEMPLATE = """\
+Working directory: {cwd}
+Command:
+{command}
 """
 
 # --- Logging -----------------------------------------------------------------
@@ -173,6 +200,20 @@ def resolve_model(env: dict | None = None) -> str:
     """ANTHROPIC_DEFAULT_SONNET_MODEL env var if set, else the undated alias."""
     env = env if env is not None else os.environ
     return env.get("ANTHROPIC_DEFAULT_SONNET_MODEL", DEFAULT_MODEL)
+
+
+def resolve_effort(env: dict | None = None) -> str:
+    """PERMISSIONS_JUDITOR_EFFORT env var if set to a valid level, else "medium".
+
+    "medium" balances latency (this hook blocks the permission dialog)
+    against classification depth on adversarial/obfuscated commands, where
+    "low" risks under-reasoning. Unset or an unrecognized value both fall
+    back to the default rather than raising, matching resolve_model's
+    tolerance for a misconfigured environment.
+    """
+    env = env if env is not None else os.environ
+    value = env.get(EFFORT_ENV_VAR, DEFAULT_EFFORT)
+    return value if value in EFFORT_LEVELS else DEFAULT_EFFORT
 
 
 def resolve_watched_patterns(env: dict | None = None) -> tuple[str, ...]:
@@ -322,10 +363,10 @@ def _format_prose_list(entries: list[str]) -> str:
     return "; ".join(entries) if entries else "(none configured)"
 
 
-def build_prompt(command: str, cwd: str, reference_rules: dict, auto_mode: dict) -> str:
-    return PROMPT_TEMPLATE.format(
-        cwd=cwd,
-        command=command[:MAX_COMMAND_CHARS],
+def build_system_prompt(reference_rules: dict, auto_mode: dict) -> str:
+    """The static instructions + reference-rules block, sent as the request's
+    cacheable system prompt (see SYSTEM_TEMPLATE)."""
+    return SYSTEM_TEMPLATE.format(
         deny_rules=_format_rule_list(reference_rules["deny"]),
         ask_rules=_format_rule_list(reference_rules["ask"]),
         allow_rules=_format_rule_list(reference_rules["allow"]),
@@ -336,9 +377,17 @@ def build_prompt(command: str, cwd: str, reference_rules: dict, auto_mode: dict)
     )
 
 
+def build_user_prompt(command: str, cwd: str) -> str:
+    """The per-call variable part: cwd and the command itself (see USER_TEMPLATE)."""
+    return USER_TEMPLATE.format(cwd=cwd, command=command[:MAX_COMMAND_CHARS])
+
+
 # Fields worth scanning at a glance, in display order; everything else
-# (session_id, cwd, error) follows after, in its original order.
-LOG_FIELD_ORDER = ("timestamp", "outcome", "decision", "reasoning", "command")
+# (session_id, cwd, error) follows after, in its original order. elapsed_ms
+# is the API-call wall time only (excludes command parsing/logging), so a
+# p50/p95 pulled straight from this log reflects the latency lever this hook
+# actually controls (model, effort, prompt caching) rather than local noise.
+LOG_FIELD_ORDER = ("timestamp", "outcome", "decision", "elapsed_ms", "reasoning", "command")
 
 
 def _log(record: dict) -> None:
@@ -403,29 +452,35 @@ def run(raw_input: str) -> dict:
         _log({**base, "outcome": "skip_no_credentials"})
         return {}
 
+    start = time.monotonic()
     try:
         reference_rules = load_reference_bash_rules()
         auto_mode = load_auto_mode_context()
-        prompt = build_prompt(command, cwd, reference_rules, auto_mode)
-        result = AnthropicClient.from_env().complete_with_tool(
+        result = AnthropicClient.from_env(timeout=API_TIMEOUT).complete_with_tool(
             model=resolve_model(),
-            prompt=prompt,
+            prompt=build_user_prompt(command, cwd),
             tool_name=TOOL_NAME,
             tool_description=TOOL_DESCRIPTION,
             input_schema=INPUT_SCHEMA,
             max_tokens=MAX_TOKENS,
+            effort=resolve_effort(),
+            system=build_system_prompt(reference_rules, auto_mode),
+            cache_system=True,
         )
         decision = result.get("decision")
         reasoning = result.get("reasoning", "")
     except Exception as exc:  # noqa: BLE001
-        _log({**base, "outcome": "error", "error": repr(exc)})
+        elapsed_ms = round((time.monotonic() - start) * 1000)
+        _log({**base, "outcome": "error", "elapsed_ms": elapsed_ms, "error": repr(exc)})
         return {}
+
+    elapsed_ms = round((time.monotonic() - start) * 1000)
 
     if decision not in ("allow", "ask", "deny"):
-        _log({**base, "outcome": "error", "error": f"invalid decision {decision!r}"})
+        _log({**base, "outcome": "error", "elapsed_ms": elapsed_ms, "error": f"invalid decision {decision!r}"})
         return {}
 
-    _log({**base, "outcome": "decided", "decision": decision, "reasoning": reasoning})
+    _log({**base, "outcome": "decided", "decision": decision, "elapsed_ms": elapsed_ms, "reasoning": reasoning})
     return _decision_output(decision, reasoning)
 
 

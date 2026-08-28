@@ -55,12 +55,21 @@ The literal `"$defaults"` placeholder entry (Claude Code substitutes this for it
 - **ask** — genuinely ambiguous, or a real-but-bounded side effect worth a glance: writing local files, installing packages, opening a local network listener.
 - **deny** — destructive, exfiltrates data, escalates privileges, disables security controls, obfuscates its own behavior, or targets credentials/sensitive paths.
 
-The full prompt (including few-shot examples) lives in `PROMPT_TEMPLATE` in `security-judge.py` and is easily edited.
+The full prompt (including few-shot examples) lives in `SYSTEM_TEMPLATE` (static instructions + reference rules — sent as the request's cached system prompt) and `USER_TEMPLATE` (just `cwd`/command — the part that changes every call) in `security-judge.py`, and is easily edited.
 
 ## Model Resolution
 
 1. `ANTHROPIC_DEFAULT_SONNET_MODEL` — if set, used as-is (useful on Bedrock/Vertex deployments where the bare alias may not be enabled).
 2. `claude-sonnet-5` — the undated alias, used when the env var above is unset.
+
+## Effort Resolution
+
+This hook blocks Claude Code's permission dialog, so latency is a real cost — but so is under-reasoning on an obfuscated or adversarial command. `output_config.effort` is set explicitly per call:
+
+1. `PERMISSIONS_JUDITOR_EFFORT` — if set to one of `max`/`xhigh`/`high`/`medium`/`low`, used as-is. An unset or unrecognized value falls back to the default below rather than raising.
+2. `medium` — the default, balancing latency against reasoning depth on obfuscated/adversarial commands. Lower it to `low` for faster/cheaper calls if you're confident in the classifier on your workload; raise it toward `high` for more scrutiny at the cost of latency.
+
+The request's static instructions and reference-rules block (everything except `cwd`/the command itself) are also sent as a `cache_control: ephemeral` system prompt, so repeated invocations within the cache TTL skip re-processing that prefix — another latency lever independent of effort.
 
 ## Credential Resolution
 
@@ -81,10 +90,10 @@ Missing credentials, network errors, malformed hook input, an unwatched command,
 Every invocation — not just the ones that reach a real classification — appends one JSONL line to `~/.claude/permissions-juditor/decisions.jsonl`:
 
 ```json
-{"timestamp": "2026-08-24T15:44:23", "session_id": "...", "command": "python3 -c \"print(1)\"", "cwd": "/path", "outcome": "decided", "decision": "allow", "reasoning": "Pure computation with no I/O."}
+{"timestamp": "2026-08-24T15:44:23", "session_id": "...", "command": "python3 -c \"print(1)\"", "cwd": "/path", "outcome": "decided", "decision": "allow", "elapsed_ms": 842, "reasoning": "Pure computation with no I/O."}
 ```
 
-`outcome` is one of `decided`, `skip_unwatched_command`, `skip_no_credentials`, `skip_unsupported_tool`, `skip_empty_command`, or `error` (with an `error` field describing what failed). This is the plugin's audit trail — always on, not gated behind a debug flag.
+`outcome` is one of `decided`, `skip_unwatched_command`, `skip_no_credentials`, `skip_unsupported_tool`, `skip_empty_command`, or `error` (with an `error` field describing what failed). `elapsed_ms` is the API call's wall time only (present on `decided` and `error` outcomes) — pull a p50/p95 straight from this log to check the effect of an effort or model change. This is the plugin's audit trail — always on, not gated behind a debug flag.
 
 ## Installation
 
