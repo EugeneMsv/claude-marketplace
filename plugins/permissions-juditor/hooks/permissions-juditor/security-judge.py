@@ -40,6 +40,21 @@ from anthropic_client import AnthropicClient, EFFORT_LEVELS
 WATCHED_COMMANDS_ENV_VAR = "PERMISSIONS_JUDITOR_WATCHED_COMMANDS"
 DEFAULT_WATCHED_COMMANDS = ("python3",)
 
+# Which segmenter identifies "the actual command(s) in this Bash string" for
+# watched-pattern matching. "shlex" (default) is the original flat
+# punctuation-token split below - it never raises but doesn't understand bash
+# grammar, so control structures (for/if/while/case) and command
+# substitution ($(...), `...`) can hide a watched command inside what it
+# treats as one opaque or misheaded segment (e.g. "for f in a b; do grep ...;
+# done" segments as ["do grep ..."], not ["grep ..."], so "grep*" won't
+# match). "bashlex" parses the command with the real bash grammar (see
+# segment_commands_bashlex) and doesn't have that blind spot, at the cost of
+# a third-party dependency - lazily imported so the plugin stays
+# stdlib-only unless this is explicitly opted into.
+SEGMENTER_ENV_VAR = "PERMISSIONS_JUDITOR_SEGMENTER"
+DEFAULT_SEGMENTER = "shlex"
+VALID_SEGMENTERS = ("shlex", "bashlex")
+
 # Tokens that precede the real command in a segment without being it -
 # a shell env-var assignment (VAR=value) or a common wrapper binary. Skipped
 # when identifying a segment's actual command token.
@@ -195,6 +210,40 @@ Command:
 
 LOG_PATH = Path.home() / ".claude" / "permissions-juditor" / "decisions.jsonl"
 
+# --- Optional bashlex segmenter dependency ------------------------------------
+
+# hooks.json invokes this script as bare `python3` on PATH - shared across
+# every install of this plugin, so it can't hardcode a personal venv path.
+# A Homebrew/system python3 is typically "externally managed" (PEP 668) and
+# refuses `pip install`, even with --user - so bashlex, needed only when
+# PERMISSIONS_JUDITOR_SEGMENTER=bashlex, is looked up here in an isolated
+# per-user venv instead of the interpreter's own site-packages. See
+# _import_bashlex().
+BASHLEX_VENV_DIR = Path.home() / ".claude" / "permissions-juditor" / "venv"
+
+
+def _import_bashlex():
+    """Import bashlex - first normally, then (if that fails) from
+    BASHLEX_VENV_DIR's site-packages if that venv exists, e.g. created via:
+        python3 -m venv ~/.claude/permissions-juditor/venv
+        ~/.claude/permissions-juditor/venv/bin/pip install bashlex
+    Re-raises ImportError if neither resolves - callers needing the
+    "never raises" guarantee must catch it (see is_watched_command()).
+    """
+    try:
+        import bashlex
+        return bashlex
+    except ImportError:
+        pass
+
+    for site_packages in sorted(BASHLEX_VENV_DIR.glob("lib/python*/site-packages")):
+        path_str = str(site_packages)
+        if path_str not in sys.path:
+            sys.path.append(path_str)
+
+    import bashlex  # raises ImportError again here if still not found
+    return bashlex
+
 
 def resolve_model(env: dict | None = None) -> str:
     """ANTHROPIC_DEFAULT_SONNET_MODEL env var if set, else the undated alias."""
@@ -233,6 +282,17 @@ def resolve_watched_patterns(env: dict | None = None) -> tuple[str, ...]:
             entry.strip() for entry in env[WATCHED_COMMANDS_ENV_VAR].split(",") if entry.strip()
         )
     return tuple(entry if "*" in entry else f"{entry}*" for entry in raw_entries)
+
+
+def resolve_segmenter(env: dict | None = None) -> str:
+    """PERMISSIONS_JUDITOR_SEGMENTER env var: "shlex" (default) or "bashlex".
+
+    Unset or an unrecognized value both fall back to "shlex", matching
+    resolve_effort's tolerance for a misconfigured environment.
+    """
+    env = env if env is not None else os.environ
+    value = env.get(SEGMENTER_ENV_VAR, DEFAULT_SEGMENTER)
+    return value if value in VALID_SEGMENTERS else DEFAULT_SEGMENTER
 
 
 def segment_commands(command: str) -> list[str]:
@@ -274,15 +334,96 @@ def segment_commands(command: str) -> list[str]:
     return segments
 
 
-def is_watched_command(command: str, patterns: tuple[str, ...]) -> bool:
-    """True if ANY pipeline/chain segment's actual command matches ANY watched pattern."""
+def _bashlex_command_words(command_node) -> list[str]:
+    """Word-kind parts of a bashlex 'command' node, in argv order. Assignment
+    parts (VAR=value) are excluded by construction - bashlex gives them their
+    own kind='assignment', distinct from kind='word'."""
+    return [part.word for part in command_node.parts if getattr(part, "kind", None) == "word"]
+
+
+def _bashlex_segment(command_node) -> str | None:
+    """Space-joined command string for one bashlex 'command' node, with any
+    leading LEADING_WRAPPER_TOKENS stripped - the AST equivalent of
+    segment_commands()'s token-stripping loop. None if nothing is left after
+    stripping (e.g. a command node that's only an assignment)."""
+    words = _bashlex_command_words(command_node)
+    start = 0
+    while start < len(words) and words[start] in LEADING_WRAPPER_TOKENS:
+        start += 1
+    remaining = words[start:]
+    return " ".join(remaining) if remaining else None
+
+
+def segment_commands_bashlex(command: str) -> list[str]:
+    """bashlex-AST equivalent of segment_commands(): walks the real bash
+    grammar instead of a flat punctuation-token split, so shell control
+    structures and command substitution can't hide a command from watched-
+    pattern matching the way they do under segment_commands() - e.g.
+    "for f in a b; do grep ...; done" segments as ["do grep ..."] there
+    (head token "do" isn't stripped, so "grep*" never matches), but here
+    walks into the for-loop's body and yields ["grep ..."] directly.
+
+    Recurses into every 'command' node found anywhere in the tree (inside
+    for/if/while/until/case bodies, subshells "(...)", brace groups "{...}",
+    and pipelines - all represented as containers with a .parts and/or .list
+    of child nodes, so a single generic walk covers them without needing to
+    special-case each construct by name) and additionally into any
+    command substitution ($(...) or `...`) found inside a word's own parts,
+    so a watched command hidden inside another command's argument is still
+    caught.
+
+    Unlike segment_commands(), this can raise: ImportError if bashlex isn't
+    installed, or bashlex.errors.ParsingError on malformed bash. Callers that
+    need the "never raises" guarantee must catch and fall back - see
+    is_watched_command().
+    """
+    bashlex = _import_bashlex()  # lazy: keeps the plugin stdlib-only unless opted into
+
+    segments: list[str] = []
+
+    def walk(node) -> None:
+        if getattr(node, "kind", None) == "command":
+            segment = _bashlex_segment(node)
+            if segment:
+                segments.append(segment)
+            for part in node.parts:
+                if getattr(part, "kind", None) != "word":
+                    continue
+                for sub in getattr(part, "parts", None) or []:
+                    if getattr(sub, "kind", None) == "commandsubstitution":
+                        walk(sub.command)
+            return
+        for attr in ("parts", "list"):
+            value = getattr(node, attr, None)
+            if value is None:
+                continue
+            for child in value if isinstance(value, list) else [value]:
+                walk(child)
+
+    for tree in bashlex.parse(command):
+        walk(tree)
+    return segments
+
+
+def is_watched_command(command: str, patterns: tuple[str, ...], env: dict | None = None) -> bool:
+    """True if ANY pipeline/chain segment's actual command matches ANY watched pattern.
+
+    Segmenter picked by resolve_segmenter(env) - "shlex" (default, original
+    behavior, unchanged) or "bashlex" (see segment_commands_bashlex). A
+    bashlex failure (not installed, or a parse error on malformed bash) falls
+    back to the shlex segmenter for that call - segmenter choice must never
+    be the reason this hook raises.
+    """
     if not patterns:
         return False
-    return any(
-        fnmatch.fnmatch(segment, pattern)
-        for segment in segment_commands(command)
-        for pattern in patterns
-    )
+    if resolve_segmenter(env) == "bashlex":
+        try:
+            segments = segment_commands_bashlex(command)
+        except Exception:  # noqa: BLE001 - ImportError, bashlex.errors.ParsingError, etc.
+            segments = segment_commands(command)
+    else:
+        segments = segment_commands(command)
+    return any(fnmatch.fnmatch(segment, pattern) for segment in segments for pattern in patterns)
 
 
 def _read_settings_json(settings_path: Path | None = None) -> dict:

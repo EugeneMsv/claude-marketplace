@@ -27,7 +27,23 @@ Because this lives in the script rather than `hooks.json`, changing scope takes 
 
 A command like `cat data.json | python3 -` or `sudo python3 x.py` has `python3` as the *second* command, not the first token of the whole string. `security-judge.py` uses `shlex` (stdlib, no new dependency) with `punctuation_chars=True` to tokenize the command, splits it into pipeline/chain segments on `|`/`&`/`;`/`(`/`)`, skips a leading `VAR=value` assignment or a wrapper (`sudo`/`time`/`nice`/`nohup`) in each segment, and glob-matches every segment against the watched patterns. A pipe character inside a quoted argument (`python3 -c "print('a|b')"`) is correctly kept as part of that one token, not mistaken for a real pipeline boundary.
 
-**Known ceiling:** `shlex` is a lexer, not a shell grammar parser. `$(...)` command substitution, here-docs, and control-flow keywords (`if`/`for`/`while`) can still hide a watched command from detection. A narrow custom pattern like `python3 -m *` also won't match if flags are reordered or inserted before `-m` (e.g. `python3 -u -m foo`) — that's a property of glob matching itself, unrelated to segmentation, and doesn't affect the plain `python3` default entry.
+**Known ceiling:** `shlex` is a lexer, not a shell grammar parser. `$(...)` command substitution, here-docs, and control-flow keywords (`if`/`for`/`while`) can still hide a watched command from detection — e.g. `for f in a b; do grep ... "$f"; done` segments as `["do grep ... $f"]`, and `do` (not a stripped wrapper token) becomes the head, so a `grep*` pattern never matches. A narrow custom pattern like `python3 -m *` also won't match if flags are reordered or inserted before `-m` (e.g. `python3 -u -m foo`) — that's a property of glob matching itself, unrelated to segmentation, and doesn't affect the plain `python3` default entry.
+
+### Optional: real shell-grammar segmentation via `PERMISSIONS_JUDITOR_SEGMENTER`
+
+| Value | Effect |
+|---|---|
+| *(unset)* / `shlex` | Default — the flat punctuation-token segmenter described above, unchanged. |
+| `bashlex` | Parses the command with [bashlex](https://github.com/idank/bashlex) (real bash grammar) instead — correctly walks into `for`/`if`/`while`/`until`/`case` bodies, subshells `(...)`, and `$(...)`/backtick command substitution, closing the "known ceiling" gap above. Falls back to the `shlex` segmenter on any failure (bashlex not installed, or a parse error on malformed bash) — segmenter choice never causes this hook to raise. |
+
+`bashlex` is a third-party dependency, so it's opt-in and lazily imported — the plugin stays stdlib-only unless you set this. `hooks.json` invokes this script as bare `python3` on `PATH`, shared across every install of this plugin, so it can't hardcode a personal venv path; a Homebrew/system `python3` is typically "externally managed" (PEP 668) and refuses `pip install` even with `--user`. To enable `bashlex` mode without touching system packages, install it into an isolated venv at the conventional path this hook checks automatically if the plain `import bashlex` fails:
+
+```bash
+python3 -m venv ~/.claude/permissions-juditor/venv
+~/.claude/permissions-juditor/venv/bin/pip install bashlex
+```
+
+Then set `PERMISSIONS_JUDITOR_SEGMENTER=bashlex` (e.g. in the `env` block of `~/.claude/settings.json`). No `hooks.json` edit or Claude Code restart needed — same live-reload property as `PERMISSIONS_JUDITOR_WATCHED_COMMANDS`.
 
 ### Reference rules from your own settings — non-binding except deny
 

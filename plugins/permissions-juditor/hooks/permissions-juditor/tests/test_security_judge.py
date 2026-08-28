@@ -210,6 +210,139 @@ def test_isWatchedCommand_noSegmentMatches_returnsFalse():
     assert judge.is_watched_command("ls -la", ("python3*",)) is False
 
 
+# --- resolve_segmenter ---------------------------------------------------------
+
+
+def test_resolveSegmenter_unset_defaultsToShlex():
+    assert judge.resolve_segmenter({}) == "shlex"
+
+
+def test_resolveSegmenter_explicitShlex_usesShlex():
+    assert judge.resolve_segmenter({judge.SEGMENTER_ENV_VAR: "shlex"}) == "shlex"
+
+
+def test_resolveSegmenter_explicitBashlex_usesBashlex():
+    assert judge.resolve_segmenter({judge.SEGMENTER_ENV_VAR: "bashlex"}) == "bashlex"
+
+
+def test_resolveSegmenter_invalidValue_fallsBackToShlex():
+    assert judge.resolve_segmenter({judge.SEGMENTER_ENV_VAR: "regex"}) == "shlex"
+
+
+# --- segment_commands_bashlex ---------------------------------------------------
+
+try:
+    import bashlex as _bashlex_module  # noqa: F401
+
+    _HAS_BASHLEX = True
+except ImportError:
+    _HAS_BASHLEX = False
+
+requires_bashlex = pytest.mark.skipif(not _HAS_BASHLEX, reason="prototype segmenter is opt-in")
+
+# The exact script from the conversation that motivated this prototype: a
+# `for ...; do ... done` loop whose body pipes a grep through && and ||.
+# Under segment_commands() (flat punctuation-token split), the loop body
+# segments as ["do echo ... grep ... $f", "echo ... REVIEW", "echo ... clean: ..."]
+# - "do" is the head token (not in LEADING_WRAPPER_TOKENS, so never stripped),
+# so a "grep*" pattern never matches. segment_commands_bashlex() walks into
+# the for-loop's body instead and yields "grep ..." as its own segment.
+FOR_LOOP_GREP_SCRIPT = """\
+cd /home/user/dev/repo/myrepo
+echo "=== machine-neutrality sweep ==="
+for f in a.md b.md; do
+  echo "-- $f"
+  grep -nE 'pattern' "$f" && echo "   ^ REVIEW" || echo "   clean"
+done
+"""
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_plainCommand_returnsSingleSegment():
+    assert judge.segment_commands_bashlex("python3 -c 'print(1)'") == ["python3 -c print(1)"]
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_pipedCommand_returnsTwoSegments():
+    assert judge.segment_commands_bashlex("cat data.json | python3 -") == ["cat data.json", "python3 -"]
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_chainedCommand_returnsTwoSegments():
+    assert judge.segment_commands_bashlex("build.sh && python3 test.py") == ["build.sh", "python3 test.py"]
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_sudoPrefixed_skipsWrapperToken():
+    assert judge.segment_commands_bashlex("sudo python3 x.py") == ["python3 x.py"]
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_envAssignmentPrefixed_skipsAssignmentToken():
+    assert judge.segment_commands_bashlex("FOO=bar python3 x.py") == ["python3 x.py"]
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_malformedBash_raises():
+    with pytest.raises(Exception):
+        judge.segment_commands_bashlex("if grep x; then")
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_forLoopBody_findsGrepAsOwnSegment():
+    segments = judge.segment_commands_bashlex(FOR_LOOP_GREP_SCRIPT)
+
+    assert "grep -nE pattern $f" in segments
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_ifStatementBody_findsCommandAsOwnSegment():
+    segments = judge.segment_commands_bashlex("if grep -q x file; then echo yes; fi")
+
+    assert "grep -q x file" in segments
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_subshell_findsCommandAsOwnSegment():
+    segments = judge.segment_commands_bashlex("( cd /tmp && grep foo x )")
+
+    assert "grep foo x" in segments
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_commandSubstitution_findsInnerCommandAsOwnSegment():
+    segments = judge.segment_commands_bashlex("echo $(grep foo bar.txt)")
+
+    assert "grep foo bar.txt" in segments
+
+
+# --- is_watched_command: shlex vs bashlex on the motivating script -------------
+
+
+def test_isWatchedCommand_forLoopGrepScript_shlexSegmenter_missesGrep():
+    """Documents the false negative this prototype exists to fix."""
+    env = {judge.SEGMENTER_ENV_VAR: "shlex"}
+
+    assert judge.is_watched_command(FOR_LOOP_GREP_SCRIPT, ("grep*",), env) is False
+
+
+@requires_bashlex
+def test_isWatchedCommand_forLoopGrepScript_bashlexSegmenter_catchesGrep():
+    env = {judge.SEGMENTER_ENV_VAR: "bashlex"}
+
+    assert judge.is_watched_command(FOR_LOOP_GREP_SCRIPT, ("grep*",), env) is True
+
+
+def test_isWatchedCommand_bashlexSegmenterButNotInstalled_fallsBackToShlexResult():
+    env = {judge.SEGMENTER_ENV_VAR: "bashlex"}
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setitem(sys.modules, "bashlex", None)
+
+        result = judge.is_watched_command(FOR_LOOP_GREP_SCRIPT, ("grep*",), env)
+
+    assert result is False  # same as the shlex segmenter would give directly
+
+
 # --- load_reference_bash_rules --------------------------------------------------
 
 
