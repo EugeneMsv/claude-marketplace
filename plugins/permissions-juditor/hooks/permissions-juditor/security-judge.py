@@ -27,6 +27,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
+import re
 import shlex
 import sys
 import time
@@ -354,6 +355,27 @@ def _bashlex_segment(command_node) -> str | None:
     return " ".join(remaining) if remaining else None
 
 
+# bashlex.parse() can't find a heredoc's closing line when the opener quotes
+# its delimiter (<<'PY' or <<"PY") - only the unquoted form (<<PY) parses;
+# the quoted form raises bashlex.errors.ParsingError("... delimited by
+# end-of-file") even when a valid closing line is present. Quoting the
+# delimiter is the standard idiom for suppressing $-expansion inside the
+# body (exactly what multi-line python3/bash heredoc invocations use), so
+# without this every such command would raise here and silently fall back
+# to segment_commands() - the flat segmenter this mode exists to improve on.
+# `(?<!<)` / `(?!<)` excludes `<<<` (herestring, which takes no delimiter).
+HEREDOC_QUOTED_DELIM_RE = re.compile(r"(?<!<)(<<-?)(?!<)[ \t]*(['\"])([A-Za-z_]\w*)\2")
+
+
+def _unquote_heredoc_delimiters(command: str) -> str:
+    """Rewrite <<'DELIM'/<<"DELIM" heredoc openers to unquoted <<DELIM so
+    bashlex.parse() can locate the closing line (see HEREDOC_QUOTED_DELIM_RE
+    above). Segmentation only ever inspects command heads, never heredoc
+    body content, so losing the quoting's $-expansion-suppression semantics
+    doesn't affect the result."""
+    return HEREDOC_QUOTED_DELIM_RE.sub(r"\1\3", command)
+
+
 def segment_commands_bashlex(command: str) -> list[str]:
     """bashlex-AST equivalent of segment_commands(): walks the real bash
     grammar instead of a flat punctuation-token split, so shell control
@@ -400,7 +422,7 @@ def segment_commands_bashlex(command: str) -> list[str]:
             for child in value if isinstance(value, list) else [value]:
                 walk(child)
 
-    for tree in bashlex.parse(command):
+    for tree in bashlex.parse(_unquote_heredoc_delimiters(command)):
         walk(tree)
     return segments
 

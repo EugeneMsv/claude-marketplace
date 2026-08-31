@@ -316,6 +316,58 @@ def test_segmentCommandsBashlex_commandSubstitution_findsInnerCommandAsOwnSegmen
     assert "grep foo bar.txt" in segments
 
 
+# The exact shape that triggered the "delimited by end-of-file" ParsingError:
+# a heredoc whose opener quotes its delimiter (<<'PY') to suppress
+# $-expansion inside the body - the standard idiom for embedded scripts, and
+# what a "cd ...\npython3 - <<'PY' ... PY" invocation uses. Without
+# _unquote_heredoc_delimiters(), bashlex.parse() never finds the closing
+# "PY" line here even though one is present.
+HEREDOC_QUOTED_DELIM_SCRIPT = """\
+cd /home/user/dev/repo/myrepo
+python3 - <<'PY'
+import pathlib
+grep_like = pathlib.Path("x").read_text()
+PY
+"""
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_quotedHeredocDelimiter_doesNotRaise():
+    segments = judge.segment_commands_bashlex(HEREDOC_QUOTED_DELIM_SCRIPT)
+
+    assert any(segment.startswith("python3") for segment in segments)
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_doubleQuotedHeredocDelimiter_doesNotRaise():
+    segments = judge.segment_commands_bashlex('python3 - <<"PY"\nprint(1)\nPY\n')
+
+    assert segments == ["python3 -"]
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_dashQuotedHeredocDelimiter_doesNotRaise():
+    segments = judge.segment_commands_bashlex("python3 - <<-'PY'\n\tprint(1)\n\tPY\n")
+
+    assert segments == ["python3 -"]
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_unquotedHeredocDelimiter_stillWorks():
+    segments = judge.segment_commands_bashlex("python3 - <<PY\nprint(1)\nPY\n")
+
+    assert segments == ["python3 -"]
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_hereStringNotMistakenForHeredoc():
+    """<<< is a herestring (no delimiter word) - the quoted-heredoc rewrite
+    must not touch it via a partial match on its leading <<."""
+    segments = judge.segment_commands_bashlex("python3 -c 'x' <<< 'input data'")
+
+    assert segments == ["python3 -c x"]
+
+
 # --- is_watched_command: shlex vs bashlex on the motivating script -------------
 
 
@@ -331,6 +383,22 @@ def test_isWatchedCommand_forLoopGrepScript_bashlexSegmenter_catchesGrep():
     env = {judge.SEGMENTER_ENV_VAR: "bashlex"}
 
     assert judge.is_watched_command(FOR_LOOP_GREP_SCRIPT, ("grep*",), env) is True
+
+
+def test_isWatchedCommand_heredocQuotedDelimiterScript_shlexSegmenter_missesPython3():
+    """Documents the false negative this fix exists to close: shlex merges
+    the newline-separated "cd ..." and "python3 - <<'PY'" into one segment
+    headed by "cd", so "python3*" never matches."""
+    env = {judge.SEGMENTER_ENV_VAR: "shlex"}
+
+    assert judge.is_watched_command(HEREDOC_QUOTED_DELIM_SCRIPT, ("python3*",), env) is False
+
+
+@requires_bashlex
+def test_isWatchedCommand_heredocQuotedDelimiterScript_bashlexSegmenter_catchesPython3():
+    env = {judge.SEGMENTER_ENV_VAR: "bashlex"}
+
+    assert judge.is_watched_command(HEREDOC_QUOTED_DELIM_SCRIPT, ("python3*",), env) is True
 
 
 def test_isWatchedCommand_bashlexSegmenterButNotInstalled_fallsBackToShlexResult():
