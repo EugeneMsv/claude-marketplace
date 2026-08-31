@@ -77,8 +77,11 @@ The full prompt (including few-shot examples) lives in `SYSTEM_TEMPLATE` (static
 
 ## Model Resolution
 
-1. `ANTHROPIC_DEFAULT_SONNET_MODEL` — if set, used as-is (useful on Bedrock/Vertex deployments where the bare alias may not be enabled).
-2. `claude-sonnet-5` — the undated alias, used when the env var above is unset.
+1. `PERMISSIONS_JUDITOR_MODEL` — if set, used as-is. This hook's own override, for swapping in a different model *family* entirely (e.g. `claude-haiku-4-5` for lower latency) rather than pinning a dated alias within Sonnet. Takes priority over everything below.
+2. `ANTHROPIC_DEFAULT_SONNET_MODEL` — if set, used as-is (useful on Bedrock/Vertex deployments where the bare alias may not be enabled).
+3. `claude-sonnet-5` — the undated alias, used when neither env var above is set.
+
+Switching model is a real classification-quality tradeoff, not just a latency one — benchmarked live against this hook's own prompt (60 commands, Haiku effort=high vs Sonnet effort=medium): 88% decision agreement, but the one disagreement that mattered was Haiku declining to honor an authoritative deny-rule match (downgraded `rm -rf` under a matched deny rule to `ask`) — the one instruction this prompt marks non-negotiable. Weigh that against the latency win (Haiku warm-cache: ~1.5–1.9s vs Sonnet: ~2.0–4.5s) before switching.
 
 ## Effort Resolution
 

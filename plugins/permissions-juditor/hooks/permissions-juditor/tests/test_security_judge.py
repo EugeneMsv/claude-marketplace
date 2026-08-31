@@ -105,7 +105,7 @@ def test_log_errorRecord_errorFieldFollowsCommandFieldsAsPartOfRest():
 # --- resolve_model -----------------------------------------------------------
 
 
-def test_resolveModel_envVarSet_usesEnvValue():
+def test_resolveModel_anthropicDefaultSonnetModelSet_usesEnvValue():
     env = {"ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6"}
 
     assert judge.resolve_model(env) == "claude-sonnet-4-6"
@@ -113,6 +113,21 @@ def test_resolveModel_envVarSet_usesEnvValue():
 
 def test_resolveModel_envVarUnset_usesDefault():
     assert judge.resolve_model({}) == "claude-sonnet-5"
+
+
+def test_resolveModel_permissionsJuditorModelSet_takesPriorityOverAnthropicDefault():
+    env = {
+        judge.MODEL_ENV_VAR: "claude-haiku-4-5",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6",
+    }
+
+    assert judge.resolve_model(env) == "claude-haiku-4-5"
+
+
+def test_resolveModel_permissionsJuditorModelSetAlone_usesItOverDefault():
+    env = {judge.MODEL_ENV_VAR: "claude-haiku-4-5"}
+
+    assert judge.resolve_model(env) == "claude-haiku-4-5"
 
 
 # --- resolve_effort ------------------------------------------------------------

@@ -76,6 +76,7 @@ SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 # --- Model + API call -------------------------------------------------------
 
 DEFAULT_MODEL = "claude-sonnet-5"
+MODEL_ENV_VAR = "PERMISSIONS_JUDITOR_MODEL"
 EFFORT_ENV_VAR = "PERMISSIONS_JUDITOR_EFFORT"
 DEFAULT_EFFORT = "medium"
 
@@ -247,9 +248,12 @@ def _import_bashlex():
 
 
 def resolve_model(env: dict | None = None) -> str:
-    """ANTHROPIC_DEFAULT_SONNET_MODEL env var if set, else the undated alias."""
+    """PERMISSIONS_JUDITOR_MODEL env var if set (an explicit override for this
+    hook specifically, e.g. to swap in a faster/cheaper model family entirely),
+    else ANTHROPIC_DEFAULT_SONNET_MODEL (a pinned dated alias within the same
+    Sonnet family), else the undated Sonnet alias."""
     env = env if env is not None else os.environ
-    return env.get("ANTHROPIC_DEFAULT_SONNET_MODEL", DEFAULT_MODEL)
+    return env.get(MODEL_ENV_VAR) or env.get("ANTHROPIC_DEFAULT_SONNET_MODEL", DEFAULT_MODEL)
 
 
 def resolve_effort(env: dict | None = None) -> str:
