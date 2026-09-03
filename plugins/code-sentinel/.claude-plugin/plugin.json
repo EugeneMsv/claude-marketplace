@@ -1,5 +1,5 @@
 {
   "name": "code-sentinel",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Code Sentinel — expert code review with flow diagrams and interactive MR comment resolution"
 }
