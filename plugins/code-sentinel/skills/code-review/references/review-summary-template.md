@@ -5,6 +5,14 @@ Use this template to structure the final review output for step 9 (Provide Revie
 ```
 Code Review:
 
+Ticket & Architecture Context (if found in step 3.5)
+
+Key Docs: [Jira KEY link] · [Epic KEY link, or "no epic linked"] · [Confluence page title + link] · [another Confluence page title + link, if a second main doc surfaced] (⚠️ flag any doc >1yr old as potentially stale)
+
+[2 short paragraphs onboarding a reviewer unfamiliar with this project: what the project/feature is about, what the linked epic is trying to achieve, and the major design points surfaced by the docs above — enough to orient before reading the diff]
+
+Not attempted: [reason, e.g. "no Jira key in MR"] — omit this line if the step ran
+
 MR Context (if GitLab MR exists)
 
 - MR #: [number]

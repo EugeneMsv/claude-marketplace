@@ -27,17 +27,34 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
+import re
 import shlex
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
-from anthropic_client import AnthropicClient
+from anthropic_client import AnthropicClient, EFFORT_LEVELS
 
 # --- Scope: which commands this hook actually judges -----------------------
 
 WATCHED_COMMANDS_ENV_VAR = "PERMISSIONS_JUDITOR_WATCHED_COMMANDS"
 DEFAULT_WATCHED_COMMANDS = ("python3",)
+
+# Which segmenter identifies "the actual command(s) in this Bash string" for
+# watched-pattern matching. "shlex" (default) is the original flat
+# punctuation-token split below - it never raises but doesn't understand bash
+# grammar, so control structures (for/if/while/case) and command
+# substitution ($(...), `...`) can hide a watched command inside what it
+# treats as one opaque or misheaded segment (e.g. "for f in a b; do grep ...;
+# done" segments as ["do grep ..."], not ["grep ..."], so "grep*" won't
+# match). "bashlex" parses the command with the real bash grammar (see
+# segment_commands_bashlex) and doesn't have that blind spot, at the cost of
+# a third-party dependency - lazily imported so the plugin stays
+# stdlib-only unless this is explicitly opted into.
+SEGMENTER_ENV_VAR = "PERMISSIONS_JUDITOR_SEGMENTER"
+DEFAULT_SEGMENTER = "shlex"
+VALID_SEGMENTERS = ("shlex", "bashlex")
 
 # Tokens that precede the real command in a segment without being it -
 # a shell env-var assignment (VAR=value) or a common wrapper binary. Skipped
@@ -59,6 +76,14 @@ SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 # --- Model + API call -------------------------------------------------------
 
 DEFAULT_MODEL = "claude-sonnet-5"
+MODEL_ENV_VAR = "PERMISSIONS_JUDITOR_MODEL"
+EFFORT_ENV_VAR = "PERMISSIONS_JUDITOR_EFFORT"
+DEFAULT_EFFORT = "medium"
+
+# hooks.json sets this hook's own timeout to 25s; the API call must return
+# (or be abandoned) well before that so a slow-but-not-dead request logs as
+# an error instead of Claude Code killing the process with nothing recorded.
+API_TIMEOUT = 20
 
 TOOL_NAME = "classify_command_security"
 TOOL_DESCRIPTION = (
@@ -70,7 +95,14 @@ INPUT_SCHEMA = {
     "type": "object",
     "properties": {
         "decision": {"type": "string", "enum": ["allow", "ask", "deny"]},
-        "reasoning": {"type": "string"},
+        # Capped to one short sentence: output tokens dominate wall time on a
+        # call this small, and reasoning is nearly all of the output - see
+        # API_TIMEOUT's neighboring comment on why latency matters here.
+        "reasoning": {
+            "type": "string",
+            "description": "The specific, concrete risk factor observed (or its absence), "
+            "in one sentence of 15 words or fewer.",
+        },
     },
     "required": ["decision", "reasoning"],
     # Required by the API for a strict tool schema (HTTP 400 otherwise) - also
@@ -78,31 +110,45 @@ INPUT_SCHEMA = {
     # explicitly here too so the schema is self-documenting on its own.
     "additionalProperties": False,
 }
-MAX_TOKENS = 300
+MAX_TOKENS = 160
 MAX_COMMAND_CHARS = 4000
 
-PROMPT_TEMPLATE = """\
+# Static instructions plus reference-rules context, sent as the request's
+# system block rather than folded into the user message. It's
+# byte-identical across repeated calls within a session unless settings.json
+# changes, which is exactly what makes it worth marking cache_control:
+# ephemeral (see build_system_prompt/CACHE_SYSTEM below) - every call after
+# the first one reads it from cache instead of paying full input-token cost
+# and latency on it again. Below the model's ~1,024-token cache minimum this
+# marker is simply a no-op, not an error.
+SYSTEM_TEMPLATE = """\
 You are a security judge deciding whether a shell command should run without human review,
 should be reviewed by a human before running, or should be blocked outright.
-
-Working directory: {cwd}
-Command:
-{command}
 
 Reference — this environment's existing Bash permission rules, from its Claude Code settings
 (context only, see "How to use this reference" below):
 - Deny rules: {deny_rules}
+  Additional deny-leaning suggestion, from this environment's own auto-mode policy: {hard_deny}
 - Ask rules: {ask_rules}
+  Additional ask-leaning suggestion, from this environment's own auto-mode policy: {soft_deny}
 - Allow rules: {allow_rules}
+  Additional allow-leaning suggestion, from this environment's own auto-mode policy: {auto_allow}
+
+Environment context (org, infra, prod/non-prod heuristics), useful for resolving whether a
+hostname, GCP project, login-path, or file path named in the command is production or
+non-production: {environment}
 
 How to use this reference:
-- Deny rules are authoritative: if the command matches, or does something functionally
-equivalent to, any deny rule above, your decision MUST be "deny".
-- Ask and allow rules are NOT a rulebook to replicate. Do not look up whether the command
-happens to match an ask rule and default to "ask" because of that alone. Judge the command on
-its actual merits using the policy below - our aim is to reduce unnecessary interruptions, so
-prefer "allow" whenever you are genuinely confident the command is safe, even if a static ask
-rule would otherwise have caught it.
+- Deny rules AND their additional suggestion are authoritative: if the command matches, or does
+something functionally equivalent to, either one, your decision MUST be "deny".
+- Ask rules AND their additional suggestion are authoritative for "ask": if the command matches,
+or does something functionally equivalent to, either one, your decision MUST be "ask" at
+minimum - never "allow" on that basis alone, even if the command would otherwise look safe.
+- Allow rules and their additional suggestion are NOT a rulebook to replicate. Do not look up
+whether the command happens to match an ask rule and default to "ask" because of that alone.
+Judge the command on its actual merits using the policy below - our aim is to reduce unnecessary
+interruptions, so prefer "allow" whenever you are genuinely confident the command is safe, even
+if a static ask rule would otherwise have caught it.
 - Security still comes first: this leniency only applies when you are actually confident.
 Real uncertainty or any concrete risk factor still means "ask" or "deny" - never stretch to
 "allow" just to avoid prompting the user.
@@ -151,18 +197,77 @@ Decision: allow
 Reasoning: Runs the user's own local script against a local config file; no indication of
 destructive or exfiltrating behavior.
 
-Now classify the command above by calling the classify_command_security tool.
+Now classify the command given in this message by calling the classify_command_security tool.
+"""
+
+# The variable part of every call - cwd and the command itself - kept out of
+# SYSTEM_TEMPLATE specifically so it never becomes part of a cached prefix.
+USER_TEMPLATE = """\
+Working directory: {cwd}
+Command:
+{command}
 """
 
 # --- Logging -----------------------------------------------------------------
 
 LOG_PATH = Path.home() / ".claude" / "permissions-juditor" / "decisions.jsonl"
 
+# --- Optional bashlex segmenter dependency ------------------------------------
+
+# hooks.json invokes this script as bare `python3` on PATH - shared across
+# every install of this plugin, so it can't hardcode a personal venv path.
+# A Homebrew/system python3 is typically "externally managed" (PEP 668) and
+# refuses `pip install`, even with --user - so bashlex, needed only when
+# PERMISSIONS_JUDITOR_SEGMENTER=bashlex, is looked up here in an isolated
+# per-user venv instead of the interpreter's own site-packages. See
+# _import_bashlex().
+BASHLEX_VENV_DIR = Path.home() / ".claude" / "permissions-juditor" / "venv"
+
+
+def _import_bashlex():
+    """Import bashlex - first normally, then (if that fails) from
+    BASHLEX_VENV_DIR's site-packages if that venv exists, e.g. created via:
+        python3 -m venv ~/.claude/permissions-juditor/venv
+        ~/.claude/permissions-juditor/venv/bin/pip install bashlex
+    Re-raises ImportError if neither resolves - callers needing the
+    "never raises" guarantee must catch it (see is_watched_command()).
+    """
+    try:
+        import bashlex
+        return bashlex
+    except ImportError:
+        pass
+
+    for site_packages in sorted(BASHLEX_VENV_DIR.glob("lib/python*/site-packages")):
+        path_str = str(site_packages)
+        if path_str not in sys.path:
+            sys.path.append(path_str)
+
+    import bashlex  # raises ImportError again here if still not found
+    return bashlex
+
 
 def resolve_model(env: dict | None = None) -> str:
-    """ANTHROPIC_DEFAULT_SONNET_MODEL env var if set, else the undated alias."""
+    """PERMISSIONS_JUDITOR_MODEL env var if set (an explicit override for this
+    hook specifically, e.g. to swap in a faster/cheaper model family entirely),
+    else ANTHROPIC_DEFAULT_SONNET_MODEL (a pinned dated alias within the same
+    Sonnet family), else the undated Sonnet alias."""
     env = env if env is not None else os.environ
-    return env.get("ANTHROPIC_DEFAULT_SONNET_MODEL", DEFAULT_MODEL)
+    return env.get(MODEL_ENV_VAR) or env.get("ANTHROPIC_DEFAULT_SONNET_MODEL", DEFAULT_MODEL)
+
+
+def resolve_effort(env: dict | None = None) -> str:
+    """PERMISSIONS_JUDITOR_EFFORT env var if set to a valid level, else "medium".
+
+    "medium" balances latency (this hook blocks the permission dialog)
+    against classification depth on adversarial/obfuscated commands, where
+    "low" risks under-reasoning. Unset or an unrecognized value both fall
+    back to the default rather than raising, matching resolve_model's
+    tolerance for a misconfigured environment.
+    """
+    env = env if env is not None else os.environ
+    value = env.get(EFFORT_ENV_VAR, DEFAULT_EFFORT)
+    return value if value in EFFORT_LEVELS else DEFAULT_EFFORT
 
 
 def resolve_watched_patterns(env: dict | None = None) -> tuple[str, ...]:
@@ -182,6 +287,17 @@ def resolve_watched_patterns(env: dict | None = None) -> tuple[str, ...]:
             entry.strip() for entry in env[WATCHED_COMMANDS_ENV_VAR].split(",") if entry.strip()
         )
     return tuple(entry if "*" in entry else f"{entry}*" for entry in raw_entries)
+
+
+def resolve_segmenter(env: dict | None = None) -> str:
+    """PERMISSIONS_JUDITOR_SEGMENTER env var: "shlex" (default) or "bashlex".
+
+    Unset or an unrecognized value both fall back to "shlex", matching
+    resolve_effort's tolerance for a misconfigured environment.
+    """
+    env = env if env is not None else os.environ
+    value = env.get(SEGMENTER_ENV_VAR, DEFAULT_SEGMENTER)
+    return value if value in VALID_SEGMENTERS else DEFAULT_SEGMENTER
 
 
 def segment_commands(command: str) -> list[str]:
@@ -223,22 +339,126 @@ def segment_commands(command: str) -> list[str]:
     return segments
 
 
-def is_watched_command(command: str, patterns: tuple[str, ...]) -> bool:
-    """True if ANY pipeline/chain segment's actual command matches ANY watched pattern."""
+def _bashlex_command_words(command_node) -> list[str]:
+    """Word-kind parts of a bashlex 'command' node, in argv order. Assignment
+    parts (VAR=value) are excluded by construction - bashlex gives them their
+    own kind='assignment', distinct from kind='word'."""
+    return [part.word for part in command_node.parts if getattr(part, "kind", None) == "word"]
+
+
+def _bashlex_segment(command_node) -> str | None:
+    """Space-joined command string for one bashlex 'command' node, with any
+    leading LEADING_WRAPPER_TOKENS stripped - the AST equivalent of
+    segment_commands()'s token-stripping loop. None if nothing is left after
+    stripping (e.g. a command node that's only an assignment)."""
+    words = _bashlex_command_words(command_node)
+    start = 0
+    while start < len(words) and words[start] in LEADING_WRAPPER_TOKENS:
+        start += 1
+    remaining = words[start:]
+    return " ".join(remaining) if remaining else None
+
+
+# bashlex.parse() can't find a heredoc's closing line when the opener quotes
+# its delimiter (<<'PY' or <<"PY") - only the unquoted form (<<PY) parses;
+# the quoted form raises bashlex.errors.ParsingError("... delimited by
+# end-of-file") even when a valid closing line is present. Quoting the
+# delimiter is the standard idiom for suppressing $-expansion inside the
+# body (exactly what multi-line python3/bash heredoc invocations use), so
+# without this every such command would raise here and silently fall back
+# to segment_commands() - the flat segmenter this mode exists to improve on.
+# `(?<!<)` / `(?!<)` excludes `<<<` (herestring, which takes no delimiter).
+HEREDOC_QUOTED_DELIM_RE = re.compile(r"(?<!<)(<<-?)(?!<)[ \t]*(['\"])([A-Za-z_]\w*)\2")
+
+
+def _unquote_heredoc_delimiters(command: str) -> str:
+    """Rewrite <<'DELIM'/<<"DELIM" heredoc openers to unquoted <<DELIM so
+    bashlex.parse() can locate the closing line (see HEREDOC_QUOTED_DELIM_RE
+    above). Segmentation only ever inspects command heads, never heredoc
+    body content, so losing the quoting's $-expansion-suppression semantics
+    doesn't affect the result."""
+    return HEREDOC_QUOTED_DELIM_RE.sub(r"\1\3", command)
+
+
+def segment_commands_bashlex(command: str) -> list[str]:
+    """bashlex-AST equivalent of segment_commands(): walks the real bash
+    grammar instead of a flat punctuation-token split, so shell control
+    structures and command substitution can't hide a command from watched-
+    pattern matching the way they do under segment_commands() - e.g.
+    "for f in a b; do grep ...; done" segments as ["do grep ..."] there
+    (head token "do" isn't stripped, so "grep*" never matches), but here
+    walks into the for-loop's body and yields ["grep ..."] directly.
+
+    Recurses into every 'command' node found anywhere in the tree (inside
+    for/if/while/until/case bodies, subshells "(...)", brace groups "{...}",
+    and pipelines - all represented as containers with a .parts and/or .list
+    of child nodes, so a single generic walk covers them without needing to
+    special-case each construct by name) and additionally into any
+    command substitution ($(...) or `...`) found inside a word's own parts,
+    so a watched command hidden inside another command's argument is still
+    caught.
+
+    Unlike segment_commands(), this can raise: ImportError if bashlex isn't
+    installed, or bashlex.errors.ParsingError on malformed bash. Callers that
+    need the "never raises" guarantee must catch and fall back - see
+    is_watched_command().
+    """
+    bashlex = _import_bashlex()  # lazy: keeps the plugin stdlib-only unless opted into
+
+    segments: list[str] = []
+
+    def walk(node) -> None:
+        if getattr(node, "kind", None) == "command":
+            segment = _bashlex_segment(node)
+            if segment:
+                segments.append(segment)
+            for part in node.parts:
+                if getattr(part, "kind", None) != "word":
+                    continue
+                for sub in getattr(part, "parts", None) or []:
+                    if getattr(sub, "kind", None) == "commandsubstitution":
+                        walk(sub.command)
+            return
+        for attr in ("parts", "list"):
+            value = getattr(node, attr, None)
+            if value is None:
+                continue
+            for child in value if isinstance(value, list) else [value]:
+                walk(child)
+
+    for tree in bashlex.parse(_unquote_heredoc_delimiters(command)):
+        walk(tree)
+    return segments
+
+
+def is_watched_command(command: str, patterns: tuple[str, ...], env: dict | None = None) -> bool:
+    """True if ANY pipeline/chain segment's actual command matches ANY watched pattern.
+
+    Segmenter picked by resolve_segmenter(env) - "shlex" (default, original
+    behavior, unchanged) or "bashlex" (see segment_commands_bashlex). A
+    bashlex failure (not installed, or a parse error on malformed bash) falls
+    back to the shlex segmenter for that call - segmenter choice must never
+    be the reason this hook raises.
+    """
     if not patterns:
         return False
-    return any(
-        fnmatch.fnmatch(segment, pattern)
-        for segment in segment_commands(command)
-        for pattern in patterns
-    )
+    if resolve_segmenter(env) == "bashlex":
+        try:
+            segments = segment_commands_bashlex(command)
+        except Exception:  # noqa: BLE001 - ImportError, bashlex.errors.ParsingError, etc.
+            segments = segment_commands(command)
+    else:
+        segments = segment_commands(command)
+    return any(fnmatch.fnmatch(segment, pattern) for segment in segments for pattern in patterns)
 
 
-def load_reference_bash_rules(settings_path: Path | None = None) -> dict:
-    """Read settings_path's permissions.allow/ask/deny, filtered to Bash-prefixed
-    entries. Never raises: missing file, missing key, or malformed JSON all
-    resolve to empty lists - this is reference context for the prompt, not a
-    required input the hook depends on to function.
+def _read_settings_json(settings_path: Path | None = None) -> dict:
+    """Read and parse settings_path as a JSON object, or {} on any failure.
+
+    Never raises: missing file, unreadable file, or malformed JSON all
+    resolve to {}. Shared by load_reference_bash_rules() and
+    load_auto_mode_context(), both of which treat settings.json as optional
+    reference context rather than a required input.
 
     settings_path defaults to the module-level SETTINGS_PATH, looked up by
     name at call time (not bound as a default argument value) so tests can
@@ -249,8 +469,16 @@ def load_reference_bash_rules(settings_path: Path | None = None) -> dict:
     try:
         data = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
-        data = {}
-    permissions = data.get("permissions") if isinstance(data, dict) else None
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def load_reference_bash_rules(settings_path: Path | None = None) -> dict:
+    """Read settings_path's permissions.allow/ask/deny, filtered to Bash-prefixed
+    entries. Never raises - this is reference context for the prompt, not a
+    required input the hook depends on to function.
+    """
+    permissions = _read_settings_json(settings_path).get("permissions")
     permissions = permissions if isinstance(permissions, dict) else {}
 
     result: dict[str, list[str]] = {}
@@ -261,18 +489,72 @@ def load_reference_bash_rules(settings_path: Path | None = None) -> dict:
     return result
 
 
+# Placeholder Claude Code substitutes for its own built-in default entries at
+# runtime - meaningless as literal prompt text, filtered out before use.
+AUTO_MODE_DEFAULTS_PLACEHOLDER = "$defaults"
+AUTO_MODE_KEYS = ("environment", "allow", "soft_deny", "hard_deny")
+
+
+def load_auto_mode_context(settings_path: Path | None = None) -> dict:
+    """Read settings_path's autoMode section - the environment/allow/soft_deny/
+    hard_deny prose lists Claude Code's own auto-mode classifier uses - for
+    extra context on this deployment's org, infra, and desired policy.
+
+    Never raises: missing file, missing key, or malformed JSON all resolve to
+    empty lists - reference context, not a required input. The literal
+    "$defaults" placeholder entry (Claude Code's own built-in-defaults marker,
+    meaningless outside its own classifier) is filtered out of every list.
+    """
+    auto_mode = _read_settings_json(settings_path).get("autoMode")
+    auto_mode = auto_mode if isinstance(auto_mode, dict) else {}
+
+    result: dict[str, list[str]] = {}
+    for key in AUTO_MODE_KEYS:
+        entries = auto_mode.get(key)
+        entries = entries if isinstance(entries, list) else []
+        result[key] = [
+            e for e in entries if isinstance(e, str) and e != AUTO_MODE_DEFAULTS_PLACEHOLDER
+        ]
+    return result
+
+
 def _format_rule_list(rules: list[str]) -> str:
     return ", ".join(rules) if rules else "(none configured)"
 
 
-def build_prompt(command: str, cwd: str, reference_rules: dict) -> str:
-    return PROMPT_TEMPLATE.format(
-        cwd=cwd,
-        command=command[:MAX_COMMAND_CHARS],
+def _format_prose_list(entries: list[str]) -> str:
+    """Semicolon-joined for multi-sentence policy prose - unlike
+    _format_rule_list's comma join, these entries often contain their own
+    commas (e.g. "projects: a, b"), so ", " would blur where one entry ends
+    and the next begins."""
+    return "; ".join(entries) if entries else "(none configured)"
+
+
+def build_system_prompt(reference_rules: dict, auto_mode: dict) -> str:
+    """The static instructions + reference-rules block, sent as the request's
+    cacheable system prompt (see SYSTEM_TEMPLATE)."""
+    return SYSTEM_TEMPLATE.format(
         deny_rules=_format_rule_list(reference_rules["deny"]),
         ask_rules=_format_rule_list(reference_rules["ask"]),
         allow_rules=_format_rule_list(reference_rules["allow"]),
+        environment=_format_prose_list(auto_mode["environment"]),
+        auto_allow=_format_prose_list(auto_mode["allow"]),
+        soft_deny=_format_prose_list(auto_mode["soft_deny"]),
+        hard_deny=_format_prose_list(auto_mode["hard_deny"]),
     )
+
+
+def build_user_prompt(command: str, cwd: str) -> str:
+    """The per-call variable part: cwd and the command itself (see USER_TEMPLATE)."""
+    return USER_TEMPLATE.format(cwd=cwd, command=command[:MAX_COMMAND_CHARS])
+
+
+# Fields worth scanning at a glance, in display order; everything else
+# (session_id, cwd, error) follows after, in its original order. elapsed_ms
+# is the API-call wall time only (excludes command parsing/logging), so a
+# p50/p95 pulled straight from this log reflects the latency lever this hook
+# actually controls (model, effort, prompt caching) rather than local noise.
+LOG_FIELD_ORDER = ("timestamp", "outcome", "decision", "elapsed_ms", "reasoning", "command")
 
 
 def _log(record: dict) -> None:
@@ -280,10 +562,13 @@ def _log(record: dict) -> None:
     failure never suppresses the actual decision."""
     try:
         LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(
-            {"timestamp": datetime.now().isoformat(timespec="seconds"), **record},
-            ensure_ascii=False,
-        )
+        remaining = {"timestamp": datetime.now().isoformat(timespec="seconds"), **record}
+        ordered = {}
+        for key in LOG_FIELD_ORDER:
+            if key in remaining:
+                ordered[key] = remaining.pop(key)
+        ordered.update(remaining)
+        line = json.dumps(ordered, ensure_ascii=False)
         with open(LOG_PATH, "a", encoding="utf-8") as handle:
             handle.write(line + "\n")
     except (OSError, TypeError, ValueError):
@@ -315,7 +600,7 @@ def run(raw_input: str) -> dict:
     cwd = hook_input.get("cwd", "")
     command = (tool_input.get("command") or "").strip()
 
-    base = {"session_id": session_id, "command": command[:500], "cwd": cwd}
+    base = {"session_id": session_id, "command": command[:MAX_COMMAND_CHARS], "cwd": cwd}
 
     if tool_name != "Bash":
         _log({**base, "outcome": "skip_unsupported_tool"})
@@ -334,28 +619,35 @@ def run(raw_input: str) -> dict:
         _log({**base, "outcome": "skip_no_credentials"})
         return {}
 
+    start = time.monotonic()
     try:
         reference_rules = load_reference_bash_rules()
-        prompt = build_prompt(command, cwd, reference_rules)
-        result = AnthropicClient.from_env().complete_with_tool(
+        auto_mode = load_auto_mode_context()
+        result = AnthropicClient.from_env(timeout=API_TIMEOUT).complete_with_tool(
             model=resolve_model(),
-            prompt=prompt,
+            prompt=build_user_prompt(command, cwd),
             tool_name=TOOL_NAME,
             tool_description=TOOL_DESCRIPTION,
             input_schema=INPUT_SCHEMA,
             max_tokens=MAX_TOKENS,
+            effort=resolve_effort(),
+            system=build_system_prompt(reference_rules, auto_mode),
+            cache_system=True,
         )
         decision = result.get("decision")
         reasoning = result.get("reasoning", "")
     except Exception as exc:  # noqa: BLE001
-        _log({**base, "outcome": "error", "error": repr(exc)})
+        elapsed_ms = round((time.monotonic() - start) * 1000)
+        _log({**base, "outcome": "error", "elapsed_ms": elapsed_ms, "error": repr(exc)})
         return {}
+
+    elapsed_ms = round((time.monotonic() - start) * 1000)
 
     if decision not in ("allow", "ask", "deny"):
-        _log({**base, "outcome": "error", "error": f"invalid decision {decision!r}"})
+        _log({**base, "outcome": "error", "elapsed_ms": elapsed_ms, "error": f"invalid decision {decision!r}"})
         return {}
 
-    _log({**base, "outcome": "decided", "decision": decision, "reasoning": reasoning})
+    _log({**base, "outcome": "decided", "decision": decision, "elapsed_ms": elapsed_ms, "reasoning": reasoning})
     return _decision_output(decision, reasoning)
 
 

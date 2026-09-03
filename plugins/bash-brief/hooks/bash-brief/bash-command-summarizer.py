@@ -221,6 +221,9 @@ def summarize_command(client: AnthropicClient, command: str, char_limit: int) ->
         model=resolve_model(),
         prompt=PROMPT_TEMPLATE.format(command=truncated, char_limit=char_limit),
         max_tokens=80,
+        # Haiku 4.5 (the default model here) has no output_config.effort support
+        # at all - the API rejects it with HTTP 400. None omits the key.
+        effort=None,
     )
 
 

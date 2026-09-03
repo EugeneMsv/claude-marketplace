@@ -37,10 +37,75 @@ def _log_lines():
     return [json.loads(line) for line in judge.LOG_PATH.read_text().splitlines() if line]
 
 
+# --- _log ---------------------------------------------------------------------
+
+
+def test_log_decidedRecord_ordersFieldsTimestampOutcomeDecisionReasoningCommandThenRest():
+    judge._log(
+        {
+            "session_id": "sess-1",
+            "cwd": "/tmp/project",
+            "command": "python3 -c 'print(1)'",
+            "outcome": "decided",
+            "decision": "allow",
+            "reasoning": "pure computation",
+        }
+    )
+
+    [record] = _log_lines()
+    assert list(record.keys()) == [
+        "timestamp",
+        "outcome",
+        "decision",
+        "reasoning",
+        "command",
+        "session_id",
+        "cwd",
+    ]
+
+
+def test_log_decidedRecordWithElapsedMs_ordersElapsedMsBeforeReasoning():
+    judge._log(
+        {
+            "session_id": "sess-1",
+            "command": "python3 -c 'print(1)'",
+            "outcome": "decided",
+            "decision": "allow",
+            "elapsed_ms": 842,
+            "reasoning": "pure computation",
+        }
+    )
+
+    [record] = _log_lines()
+    assert list(record.keys()) == [
+        "timestamp",
+        "outcome",
+        "decision",
+        "elapsed_ms",
+        "reasoning",
+        "command",
+        "session_id",
+    ]
+
+
+def test_log_skipRecord_omitsMissingFieldsButKeepsOrderOfPresentOnes():
+    judge._log({"session_id": "sess-1", "cwd": "/tmp/project", "outcome": "skip_unwatched_command"})
+
+    [record] = _log_lines()
+    assert list(record.keys()) == ["timestamp", "outcome", "session_id", "cwd"]
+
+
+def test_log_errorRecord_errorFieldFollowsCommandFieldsAsPartOfRest():
+    judge._log({"session_id": None, "command": None, "cwd": None, "outcome": "error", "error": "malformed_json"})
+
+    [record] = _log_lines()
+    assert list(record.keys()) == ["timestamp", "outcome", "command", "session_id", "cwd", "error"]
+
+
 # --- resolve_model -----------------------------------------------------------
 
 
-def test_resolveModel_envVarSet_usesEnvValue():
+def test_resolveModel_anthropicDefaultSonnetModelSet_usesEnvValue():
     env = {"ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6"}
 
     assert judge.resolve_model(env) == "claude-sonnet-4-6"
@@ -48,6 +113,39 @@ def test_resolveModel_envVarSet_usesEnvValue():
 
 def test_resolveModel_envVarUnset_usesDefault():
     assert judge.resolve_model({}) == "claude-sonnet-5"
+
+
+def test_resolveModel_permissionsJuditorModelSet_takesPriorityOverAnthropicDefault():
+    env = {
+        judge.MODEL_ENV_VAR: "claude-haiku-4-5",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6",
+    }
+
+    assert judge.resolve_model(env) == "claude-haiku-4-5"
+
+
+def test_resolveModel_permissionsJuditorModelSetAlone_usesItOverDefault():
+    env = {judge.MODEL_ENV_VAR: "claude-haiku-4-5"}
+
+    assert judge.resolve_model(env) == "claude-haiku-4-5"
+
+
+# --- resolve_effort ------------------------------------------------------------
+
+
+def test_resolveEffort_envVarUnset_defaultsToMedium():
+    """Balances latency (this hook blocks the permission dialog) against
+    classification depth on adversarial/obfuscated commands."""
+    assert judge.resolve_effort({}) == "medium"
+
+
+@pytest.mark.parametrize("level", ["max", "xhigh", "high", "medium", "low"])
+def test_resolveEffort_envVarSetToValidLevel_usesEnvValue(level):
+    assert judge.resolve_effort({judge.EFFORT_ENV_VAR: level}) == level
+
+
+def test_resolveEffort_envVarSetToInvalidValue_fallsBackToMedium():
+    assert judge.resolve_effort({judge.EFFORT_ENV_VAR: "extreme"}) == "medium"
 
 
 # --- resolve_watched_patterns -------------------------------------------------
@@ -127,6 +225,207 @@ def test_isWatchedCommand_noSegmentMatches_returnsFalse():
     assert judge.is_watched_command("ls -la", ("python3*",)) is False
 
 
+# --- resolve_segmenter ---------------------------------------------------------
+
+
+def test_resolveSegmenter_unset_defaultsToShlex():
+    assert judge.resolve_segmenter({}) == "shlex"
+
+
+def test_resolveSegmenter_explicitShlex_usesShlex():
+    assert judge.resolve_segmenter({judge.SEGMENTER_ENV_VAR: "shlex"}) == "shlex"
+
+
+def test_resolveSegmenter_explicitBashlex_usesBashlex():
+    assert judge.resolve_segmenter({judge.SEGMENTER_ENV_VAR: "bashlex"}) == "bashlex"
+
+
+def test_resolveSegmenter_invalidValue_fallsBackToShlex():
+    assert judge.resolve_segmenter({judge.SEGMENTER_ENV_VAR: "regex"}) == "shlex"
+
+
+# --- segment_commands_bashlex ---------------------------------------------------
+
+try:
+    import bashlex as _bashlex_module  # noqa: F401
+
+    _HAS_BASHLEX = True
+except ImportError:
+    _HAS_BASHLEX = False
+
+requires_bashlex = pytest.mark.skipif(not _HAS_BASHLEX, reason="prototype segmenter is opt-in")
+
+# The exact script from the conversation that motivated this prototype: a
+# `for ...; do ... done` loop whose body pipes a grep through && and ||.
+# Under segment_commands() (flat punctuation-token split), the loop body
+# segments as ["do echo ... grep ... $f", "echo ... REVIEW", "echo ... clean: ..."]
+# - "do" is the head token (not in LEADING_WRAPPER_TOKENS, so never stripped),
+# so a "grep*" pattern never matches. segment_commands_bashlex() walks into
+# the for-loop's body instead and yields "grep ..." as its own segment.
+FOR_LOOP_GREP_SCRIPT = """\
+cd /home/user/dev/repo/myrepo
+echo "=== machine-neutrality sweep ==="
+for f in a.md b.md; do
+  echo "-- $f"
+  grep -nE 'pattern' "$f" && echo "   ^ REVIEW" || echo "   clean"
+done
+"""
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_plainCommand_returnsSingleSegment():
+    assert judge.segment_commands_bashlex("python3 -c 'print(1)'") == ["python3 -c print(1)"]
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_pipedCommand_returnsTwoSegments():
+    assert judge.segment_commands_bashlex("cat data.json | python3 -") == ["cat data.json", "python3 -"]
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_chainedCommand_returnsTwoSegments():
+    assert judge.segment_commands_bashlex("build.sh && python3 test.py") == ["build.sh", "python3 test.py"]
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_sudoPrefixed_skipsWrapperToken():
+    assert judge.segment_commands_bashlex("sudo python3 x.py") == ["python3 x.py"]
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_envAssignmentPrefixed_skipsAssignmentToken():
+    assert judge.segment_commands_bashlex("FOO=bar python3 x.py") == ["python3 x.py"]
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_malformedBash_raises():
+    with pytest.raises(Exception):
+        judge.segment_commands_bashlex("if grep x; then")
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_forLoopBody_findsGrepAsOwnSegment():
+    segments = judge.segment_commands_bashlex(FOR_LOOP_GREP_SCRIPT)
+
+    assert "grep -nE pattern $f" in segments
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_ifStatementBody_findsCommandAsOwnSegment():
+    segments = judge.segment_commands_bashlex("if grep -q x file; then echo yes; fi")
+
+    assert "grep -q x file" in segments
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_subshell_findsCommandAsOwnSegment():
+    segments = judge.segment_commands_bashlex("( cd /tmp && grep foo x )")
+
+    assert "grep foo x" in segments
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_commandSubstitution_findsInnerCommandAsOwnSegment():
+    segments = judge.segment_commands_bashlex("echo $(grep foo bar.txt)")
+
+    assert "grep foo bar.txt" in segments
+
+
+# The exact shape that triggered the "delimited by end-of-file" ParsingError:
+# a heredoc whose opener quotes its delimiter (<<'PY') to suppress
+# $-expansion inside the body - the standard idiom for embedded scripts, and
+# what a "cd ...\npython3 - <<'PY' ... PY" invocation uses. Without
+# _unquote_heredoc_delimiters(), bashlex.parse() never finds the closing
+# "PY" line here even though one is present.
+HEREDOC_QUOTED_DELIM_SCRIPT = """\
+cd /home/user/dev/repo/myrepo
+python3 - <<'PY'
+import pathlib
+grep_like = pathlib.Path("x").read_text()
+PY
+"""
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_quotedHeredocDelimiter_doesNotRaise():
+    segments = judge.segment_commands_bashlex(HEREDOC_QUOTED_DELIM_SCRIPT)
+
+    assert any(segment.startswith("python3") for segment in segments)
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_doubleQuotedHeredocDelimiter_doesNotRaise():
+    segments = judge.segment_commands_bashlex('python3 - <<"PY"\nprint(1)\nPY\n')
+
+    assert segments == ["python3 -"]
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_dashQuotedHeredocDelimiter_doesNotRaise():
+    segments = judge.segment_commands_bashlex("python3 - <<-'PY'\n\tprint(1)\n\tPY\n")
+
+    assert segments == ["python3 -"]
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_unquotedHeredocDelimiter_stillWorks():
+    segments = judge.segment_commands_bashlex("python3 - <<PY\nprint(1)\nPY\n")
+
+    assert segments == ["python3 -"]
+
+
+@requires_bashlex
+def test_segmentCommandsBashlex_hereStringNotMistakenForHeredoc():
+    """<<< is a herestring (no delimiter word) - the quoted-heredoc rewrite
+    must not touch it via a partial match on its leading <<."""
+    segments = judge.segment_commands_bashlex("python3 -c 'x' <<< 'input data'")
+
+    assert segments == ["python3 -c x"]
+
+
+# --- is_watched_command: shlex vs bashlex on the motivating script -------------
+
+
+def test_isWatchedCommand_forLoopGrepScript_shlexSegmenter_missesGrep():
+    """Documents the false negative this prototype exists to fix."""
+    env = {judge.SEGMENTER_ENV_VAR: "shlex"}
+
+    assert judge.is_watched_command(FOR_LOOP_GREP_SCRIPT, ("grep*",), env) is False
+
+
+@requires_bashlex
+def test_isWatchedCommand_forLoopGrepScript_bashlexSegmenter_catchesGrep():
+    env = {judge.SEGMENTER_ENV_VAR: "bashlex"}
+
+    assert judge.is_watched_command(FOR_LOOP_GREP_SCRIPT, ("grep*",), env) is True
+
+
+def test_isWatchedCommand_heredocQuotedDelimiterScript_shlexSegmenter_missesPython3():
+    """Documents the false negative this fix exists to close: shlex merges
+    the newline-separated "cd ..." and "python3 - <<'PY'" into one segment
+    headed by "cd", so "python3*" never matches."""
+    env = {judge.SEGMENTER_ENV_VAR: "shlex"}
+
+    assert judge.is_watched_command(HEREDOC_QUOTED_DELIM_SCRIPT, ("python3*",), env) is False
+
+
+@requires_bashlex
+def test_isWatchedCommand_heredocQuotedDelimiterScript_bashlexSegmenter_catchesPython3():
+    env = {judge.SEGMENTER_ENV_VAR: "bashlex"}
+
+    assert judge.is_watched_command(HEREDOC_QUOTED_DELIM_SCRIPT, ("python3*",), env) is True
+
+
+def test_isWatchedCommand_bashlexSegmenterButNotInstalled_fallsBackToShlexResult():
+    env = {judge.SEGMENTER_ENV_VAR: "bashlex"}
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setitem(sys.modules, "bashlex", None)
+
+        result = judge.is_watched_command(FOR_LOOP_GREP_SCRIPT, ("grep*",), env)
+
+    assert result is False  # same as the shlex segmenter would give directly
+
+
 # --- load_reference_bash_rules --------------------------------------------------
 
 
@@ -186,6 +485,77 @@ def test_loadReferenceBashRules_noPermissionsKey_returnsEmptyLists(tmp_path):
     assert result == {"allow": [], "ask": [], "deny": []}
 
 
+# --- load_auto_mode_context ------------------------------------------------------
+
+_EMPTY_AUTO_MODE = {"environment": [], "allow": [], "soft_deny": [], "hard_deny": []}
+
+
+def test_loadAutoModeContext_missingFile_returnsEmptyLists(tmp_path):
+    result = judge.load_auto_mode_context(tmp_path / "does-not-exist.json")
+
+    assert result == _EMPTY_AUTO_MODE
+
+
+def test_loadAutoModeContext_malformedJson_returnsEmptyLists(tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text("{not valid json")
+
+    result = judge.load_auto_mode_context(settings_path)
+
+    assert result == _EMPTY_AUTO_MODE
+
+
+def test_loadAutoModeContext_noAutoModeKey_returnsEmptyLists(tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({"someOtherKey": True}))
+
+    result = judge.load_auto_mode_context(settings_path)
+
+    assert result == _EMPTY_AUTO_MODE
+
+
+def test_loadAutoModeContext_populatedSections_returnsEachList(tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "autoMode": {
+                    "environment": ["Org: Acme Corp"],
+                    "allow": ["Read-only shell inspection is allowed"],
+                    "soft_deny": ["Never run prod ops without asking"],
+                    "hard_deny": ["Never modify prod without asking"],
+                }
+            }
+        )
+    )
+
+    result = judge.load_auto_mode_context(settings_path)
+
+    assert result == {
+        "environment": ["Org: Acme Corp"],
+        "allow": ["Read-only shell inspection is allowed"],
+        "soft_deny": ["Never run prod ops without asking"],
+        "hard_deny": ["Never modify prod without asking"],
+    }
+
+
+def test_loadAutoModeContext_defaultsPlaceholder_filteredOut(tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "autoMode": {
+                    "hard_deny": ["$defaults", "Never modify prod without asking"],
+                }
+            }
+        )
+    )
+
+    result = judge.load_auto_mode_context(settings_path)
+
+    assert result["hard_deny"] == ["Never modify prod without asking"]
+
+
 # --- run() integration ---------------------------------------------------------
 
 
@@ -197,7 +567,10 @@ class _StubClient:
         self.raises = raises
         self.received = None
 
-    def complete_with_tool(self, model, prompt, tool_name, tool_description, input_schema, max_tokens):
+    def complete_with_tool(
+        self, model, prompt, tool_name, tool_description, input_schema, max_tokens,
+        effort=None, system=None, cache_system=False,
+    ):
         self.received = {
             "model": model,
             "prompt": prompt,
@@ -205,6 +578,9 @@ class _StubClient:
             "tool_description": tool_description,
             "input_schema": input_schema,
             "max_tokens": max_tokens,
+            "effort": effort,
+            "system": system,
+            "cache_system": cache_system,
         }
         if self.raises is not None:
             raise self.raises
@@ -220,7 +596,7 @@ def _stub_anthropic_client(has_credentials, client_instance=None):
             return has_credentials
 
         @staticmethod
-        def from_env():
+        def from_env(timeout=None):
             return client_instance
 
     return Stub
@@ -262,6 +638,20 @@ def test_run_allowDecision_returnsAllowBehaviorAndLogsDecided(monkeypatch):
     [record] = _log_lines()
     assert record["outcome"] == "decided"
     assert record["decision"] == "allow"
+    assert isinstance(record["elapsed_ms"], int)
+    assert record["elapsed_ms"] >= 0
+
+
+def test_run_watchedCommand_logsCommandUpToMaxCommandCharsNotJustFirst500(monkeypatch):
+    long_command = "python3 -c \"print('" + ("x" * 600) + "')\""
+    assert 500 < len(long_command) <= judge.MAX_COMMAND_CHARS
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "pure computation"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    judge.run(_hook_input(long_command))
+
+    [record] = _log_lines()
+    assert record["command"] == long_command
 
 
 def test_run_askDecision_returnsAskBehaviorWithMessage(monkeypatch):
@@ -297,6 +687,25 @@ def test_run_malformedJson_returnsEmptyAndLogsError(monkeypatch):
     [record] = _log_lines()
     assert record["outcome"] == "error"
     assert record["error"] == "malformed_json"
+
+
+def test_run_defaultEnv_passesMediumEffortToCompleteWithTool(monkeypatch):
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "pure computation"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    judge.run(_hook_input("python3 -c 'print(1)'"))
+
+    assert stub_client.received["effort"] == "medium"
+
+
+def test_run_effortEnvVarSet_passesConfiguredEffort(monkeypatch):
+    monkeypatch.setenv(judge.EFFORT_ENV_VAR, "high")
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "pure computation"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    judge.run(_hook_input("python3 -c 'print(1)'"))
+
+    assert stub_client.received["effort"] == "high"
 
 
 def test_run_nonBashTool_returnsEmptyAndLogsSkipUnsupportedTool(monkeypatch):
@@ -364,16 +773,56 @@ def test_run_invalidDecisionValue_returnsEmptyAndLogsError(monkeypatch):
     assert "maybe" in record["error"]
 
 
-def test_run_watchedCommand_sendsCommandAndCwdInPrompt(monkeypatch):
+def test_run_watchedCommand_sendsCommandAndCwdInUserPromptNotSystem(monkeypatch):
+    """cwd/command are the per-call variable part - they belong in the user
+    message, never in the cacheable system block."""
     stub_client = _StubClient(result={"decision": "allow", "reasoning": "safe"})
     monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
 
-    judge.run(_hook_input("python3 train_model.py", cwd="/Users/dev/project"))
+    judge.run(_hook_input("python3 sync_inventory_ledger.py", cwd="/Users/dev/project"))
 
-    assert "python3 train_model.py" in stub_client.received["prompt"]
+    assert "python3 sync_inventory_ledger.py" in stub_client.received["prompt"]
     assert "/Users/dev/project" in stub_client.received["prompt"]
+    assert "python3 sync_inventory_ledger.py" not in stub_client.received["system"]
     assert stub_client.received["tool_name"] == judge.TOOL_NAME
     assert stub_client.received["input_schema"] == judge.INPUT_SCHEMA
+
+
+def test_run_watchedCommand_cachesSystemPrompt(monkeypatch):
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "safe"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    judge.run(_hook_input("python3 train_model.py"))
+
+    assert stub_client.received["cache_system"] is True
+
+
+def test_run_watchedCommand_autoModeContextIncludedInSystemPrompt(monkeypatch, tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "autoMode": {
+                    "environment": ["$defaults", "Org: Acme Corp, ad-tech"],
+                    "hard_deny": ["Never modify prod without asking"],
+                    "soft_deny": ["Never run prod ops without asking first"],
+                    "allow": ["Read-only shell inspection is allowed"],
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(judge, "SETTINGS_PATH", settings_path)
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "safe"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    judge.run(_hook_input("python3 train_model.py"))
+
+    system_prompt = stub_client.received["system"]
+    assert "Org: Acme Corp, ad-tech" in system_prompt
+    assert "Never modify prod without asking" in system_prompt
+    assert "Never run prod ops without asking first" in system_prompt
+    assert "Read-only shell inspection is allowed" in system_prompt
+    assert "$defaults" not in system_prompt
 
 
 def _run_main(hook_input: dict, monkeypatch, capsys) -> dict:

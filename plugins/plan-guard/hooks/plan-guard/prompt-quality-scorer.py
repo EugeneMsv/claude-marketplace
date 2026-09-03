@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""UserPromptSubmit hook — scores incoming prompt quality when in plan mode."""
+"""UserPromptSubmit hook — scores incoming prompt quality when in plan mode.
+
+Disabled by default (costs an extra model call per prompt); set
+PLAN_GUARD_PROMPT_SCORER_ENABLED=1 to opt in.
+"""
 
 import json
 import os
@@ -38,7 +42,12 @@ def score_prompt(client: AnthropicClient, prompt_text: str) -> str:
     # ANTHROPIC_MODEL is a CLI alias ("opus"), not a real model id — resolve a concrete one.
     model = os.environ.get("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-4-6")
     return client.complete(
-        model=model, prompt=PROMPT_TEMPLATE.format(prompt=prompt_text), max_tokens=400
+        model=model,
+        prompt=PROMPT_TEMPLATE.format(prompt=prompt_text),
+        max_tokens=400,
+        # Explicit rather than relying on the client's own default, so this
+        # hook's behavior is visible here rather than inherited silently.
+        effort="medium",
     )
 
 
@@ -59,7 +68,16 @@ def parse_response(raw: str) -> tuple[str, str]:
     return score_label, feedback
 
 
+def scorer_enabled() -> bool:
+    """Opt-in: every prompt scored costs an extra model call, so default off."""
+    return os.environ.get("PLAN_GUARD_PROMPT_SCORER_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def main() -> None:
+    if not scorer_enabled():
+        print("{}")
+        return
+
     if not AnthropicClient.has_credentials():
         print(json.dumps({"systemMessage": "[prompt-scorer] No credentials detected, skipping"}))
         return

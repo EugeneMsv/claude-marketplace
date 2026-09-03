@@ -84,8 +84,8 @@ class _StubClient:
         self.raises = raises
         self.received = None
 
-    def complete(self, model, prompt, max_tokens):
-        self.received = {"model": model, "prompt": prompt, "max_tokens": max_tokens}
+    def complete(self, model, prompt, max_tokens, effort=None):
+        self.received = {"model": model, "prompt": prompt, "max_tokens": max_tokens, "effort": effort}
         if self.raises is not None:
             raise self.raises
         return self.response_text
@@ -354,6 +354,16 @@ def test_summarizeCommand_sendsCharLimitInPrompt():
     summarizer.summarize_command(stub_client, "ls -la", 42)
 
     assert "42" in stub_client.received["prompt"]
+
+
+def test_summarizeCommand_omitsEffort():
+    """Haiku 4.5 (the default model here) has no output_config.effort support -
+    the API rejects it with HTTP 400 - so this call site must pass None."""
+    stub_client = _StubClient(response_text=SAMPLE_SENTENCE)
+
+    summarizer.summarize_command(stub_client, "ls -la", 42)
+
+    assert stub_client.received["effort"] is None
 
 
 def test_buildMcpSubject_emptyParams_rendersEmptyJsonObject():

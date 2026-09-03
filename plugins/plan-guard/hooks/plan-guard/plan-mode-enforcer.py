@@ -217,7 +217,14 @@ def build_requirements_message(client: AnthropicClient, context: str) -> str:
     """Generate the planning requirements via a cheap classification-tier model."""
     # ANTHROPIC_MODEL is a CLI alias ("opus"), not a real model id — resolve a concrete one.
     model = os.environ.get("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-4-6")
-    return client.complete(model=model, prompt=PROMPT_TEMPLATE.format(context=context), max_tokens=2000)
+    return client.complete(
+        model=model,
+        prompt=PROMPT_TEMPLATE.format(context=context),
+        max_tokens=2000,
+        # "cheap classification-tier" per the docstring above - medium matches
+        # that intent instead of silently inheriting the API's "high" default.
+        effort="medium",
+    )
 
 
 def emit(hook_event: str, system_message: str, status_line: str) -> None:

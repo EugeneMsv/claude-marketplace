@@ -57,6 +57,8 @@ Resolves the model in this order:
 1. `ANTHROPIC_DEFAULT_HAIKU_MODEL` — Claude Code's own documented env var for pinning the Haiku-class model (useful on Amazon Bedrock/Google Vertex deployments where the bare alias may not be enabled).
 2. `claude-haiku-4-5` — the Claude API's undated convenience alias for the latest Haiku 4.5 snapshot, used when the env var above is unset.
 
+**No `output_config.effort` support:** Haiku 4.5 and earlier reject the `effort` field outright with HTTP 400. `summarize_command()` passes `effort=None` for exactly this reason — pointing `ANTHROPIC_DEFAULT_HAIKU_MODEL` at a different model doesn't change that, since no Haiku-class model supports it. (`anthropic_client.py` also retries once with `effort`/`thinking` stripped on a 400 that names either field, as a safety net if this ever gets out of sync.)
+
 ## Credential Resolution
 
 This hook calls the public Messages API directly, so it needs a credential of its own — one that's separate from however you're logged into Claude Code. `anthropic_client.py` resolves it in this order:

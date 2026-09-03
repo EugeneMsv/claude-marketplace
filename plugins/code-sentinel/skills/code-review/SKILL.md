@@ -50,6 +50,18 @@ You are an expert Senior Software Engineer performing a code review.
     - Use this context to inform the review (do NOT store separately)
     - Flag as a finding when a real, non-trivial change in the diff is absent from the MR description's stated scope — even if a reviewer comment confirms it's intentional, it should still be documented in the description for future readers
 
+3.5 **Deep Research Context** (Optional, best-effort — attempt first, before generating the diff)
+    - Purpose: ground the review in the ticket's intent and any existing architecture docs before judging the diff
+    - Extract a Jira key from the MR title/description or branch name (e.g. `PROJ-12345` pattern); if none found, skip this step entirely — do NOT guess a ticket from title text alone
+    - Delegate this to a research agent if one is available in this setup (e.g. a deep-research-style agent); otherwise fall back to whatever general-purpose subagent is available, or do it inline yourself — let whichever agent runs figure out which tools it has access to
+    - Ask the agent to:
+        - Fetch the Jira ticket for scope/acceptance criteria
+        - Find and fetch its parent epic (if linked) for broader feature context
+        - Search Confluence for relevant architecture docs — **the exact search terms/spaces are out of scope of this skill**; if the user hasn't specified them, default to a Rovo-style search: 2-3 calls varying phrasing/keywords, merge and rank results by intersection, then do a recency check (flag pages >1 year old as potentially stale and treat code as ground truth over the doc)
+        - If a couple of main architecture docs surface, list their links on top of its report; then return a short onboarding synthesis (~2 paragraphs, not a link dump) written for a reviewer unfamiliar with this project: what the project/feature is about, what the epic is trying to achieve, and the major design points surfaced by those docs — enough context to orient before reading the diff
+    - Use the returned links and synthesis to inform Design Rationale and scope judgments (step 3) and to open the review summary (step 9) — never as a substitute for reading the actual diff
+    - Best-effort: if Jira/Confluence access is unavailable, no ticket is found, or the search returns nothing useful, note the gap and proceed to step 4 — do NOT block the review on this step
+
 4. **Generate Diff**
     - Detect the actual default branch in BOTH modes (do NOT assume `main`):
       ```bash
@@ -146,6 +158,8 @@ both sub-steps before producing flow diagrams or model diff trees.
 - In **per-service mode**, use the original triple-dot diff (`git diff origin/<default-branch>...origin/<branch>`)
 - MUST store diff and review artifacts under `.claude/code-review/` (not flat in `.claude/`)
 - MUST ask the user for mode (monorepo vs. per-service) when it cannot be confidently inferred, defaulting to monorepo if still unspecified
+- SHOULD attempt Deep Research Context (step 3.5) as best-effort when a Jira key is discoverable in the MR — skip silently (no need to tell the user) when there's no key, no ticket-tracker access, or nothing relevant turns up
+- Confluence search strategy for step 3.5 is out of scope of this skill — if the user hasn't given search terms, default to a Rovo-style search (2-3 calls with varied phrasing/keywords) with a recency check on results
 - MUST skip git worktree creation by default in monorepo mode — use the diff file plus targeted `git show`/Read/Grep instead
 - MUST use git worktree per branch by default in per-service mode
 - MUST use `mcp__sequentialthinking__sequentialthinking` for complex analysis
