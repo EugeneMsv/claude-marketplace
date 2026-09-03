@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "version": "0.1.39",
+  "version": "0.1.40",
   "name": "eug-msv-claude-marketplace",
   "description": "Plugin marketplace for Claude Code from Eugene Moiseev",
   "updated": "2026-09-03",
@@ -66,7 +66,7 @@
       "name": "plan-guard",
       "source": "./plugins/plan-guard",
       "description": "Plan Guard — enforces plan mode discipline, scores incoming prompt quality, syncs plans to projects, and cleans up old plan files",
-      "version": "0.2.8",
+      "version": "0.2.9",
       "author": {
         "name": "Eugene Moiseev"
       },

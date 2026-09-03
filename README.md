@@ -69,7 +69,7 @@ Enforces plan mode discipline, syncs plan files to project directories, and clea
 
 **Skills:** `cleanup-plans`
 
-**Hooks:** `plan-mode-enforcer` (UserPromptSubmit), `copy-plan-on-change` + `copy-plan-on-exit` (PostToolUse)
+**Hooks:** `plan-mode-enforcer` (UserPromptSubmit), `prompt-quality-scorer` (UserPromptSubmit, opt-in via `PLAN_GUARD_PROMPT_SCORER_ENABLED`), `copy-plan-on-change` + `copy-plan-on-exit` (PostToolUse)
 
 **[Full Documentation →](plugins/plan-guard/README.md)**
 

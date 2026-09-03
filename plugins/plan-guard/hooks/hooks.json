@@ -1,12 +1,12 @@
 {
-  "description": "Plan Guard — enforces plan mode constraints and syncs plan files to project directories",
+  "description": "Plan Guard — enforces plan mode constraints and syncs plan files to project directories; prompt-quality-scorer is opt-in via PLAN_GUARD_PROMPT_SCORER_ENABLED (unset/0 = disabled)",
   "hooks": {
     "UserPromptSubmit": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/plan-guard/prompt-quality-scorer.py",
+            "command": "PLAN_GUARD_PROMPT_SCORER_ENABLED=${PLAN_GUARD_PROMPT_SCORER_ENABLED:-0} python3 ${CLAUDE_PLUGIN_ROOT}/hooks/plan-guard/prompt-quality-scorer.py",
             "timeout": 20
           }
         ]

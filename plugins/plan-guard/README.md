@@ -9,6 +9,7 @@ Enforces plan mode discipline, syncs plan files to project directories, and help
 | Hook | Event | Purpose |
 |---|---|---|
 | `plan-mode-enforcer` | UserPromptSubmit | Injects project-specific planning requirements at the start of each prompt in plan mode. Uses the Anthropic API to generate requirements from `CLAUDE.md` + `key-commands.md`; falls back to sensible defaults if no context found. |
+| `prompt-quality-scorer` | UserPromptSubmit | Scores prompt quality against 6 prompting principles while in plan mode and surfaces the weakest points via `systemMessage`. **Disabled by default** — costs an extra model call per prompt. Set `PLAN_GUARD_PROMPT_SCORER_ENABLED=1` (also accepts `true`/`yes`/`on`) to opt in. |
 | `copy-plan-on-change` | PostToolUse (Write/Edit) | Syncs any plan file edited under `~/.claude/plans/` to the current project's `.claude/plans/` directory. Associates plan names to project paths via `~/.claude/plans/.metadata`. |
 | `copy-plan-on-exit` | PostToolUse (ExitPlanMode) | Performs a final sync of the most recent plan file when plan mode exits. |
 

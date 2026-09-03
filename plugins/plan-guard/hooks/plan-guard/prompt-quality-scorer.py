@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""UserPromptSubmit hook — scores incoming prompt quality when in plan mode."""
+"""UserPromptSubmit hook — scores incoming prompt quality when in plan mode.
+
+Disabled by default (costs an extra model call per prompt); set
+PLAN_GUARD_PROMPT_SCORER_ENABLED=1 to opt in.
+"""
 
 import json
 import os
@@ -64,7 +68,16 @@ def parse_response(raw: str) -> tuple[str, str]:
     return score_label, feedback
 
 
+def scorer_enabled() -> bool:
+    """Opt-in: every prompt scored costs an extra model call, so default off."""
+    return os.environ.get("PLAN_GUARD_PROMPT_SCORER_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def main() -> None:
+    if not scorer_enabled():
+        print("{}")
+        return
+
     if not AnthropicClient.has_credentials():
         print(json.dumps({"systemMessage": "[prompt-scorer] No credentials detected, skipping"}))
         return
