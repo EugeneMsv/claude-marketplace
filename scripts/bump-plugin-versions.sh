@@ -108,6 +108,9 @@ for plugin in "${changed_plugins[@]}"; do
   if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "[dry-run] $plugin_json: $current_version -> $new_version"
     echo "[dry-run] $MARKETPLACE_JSON ($plugin entry): $current_version -> $new_version"
+    if [[ -f "plugins/$plugin/.codex-plugin/plugin.json" ]]; then
+      echo "[dry-run] plugins/$plugin/.codex-plugin/plugin.json: -> $new_version"
+    fi
     any_bumped=1
     continue
   fi
@@ -119,6 +122,13 @@ for plugin in "${changed_plugins[@]}"; do
     '(.plugins[] | select(.name == $name) | .version) = $v' \
     "$MARKETPLACE_JSON" > "$MARKETPLACE_JSON.tmp"
   mv "$MARKETPLACE_JSON.tmp" "$MARKETPLACE_JSON"
+
+  codex_json="plugins/$plugin/.codex-plugin/plugin.json"
+  if [[ -f "$codex_json" ]]; then
+    jq --arg v "$new_version" '.version = $v' "$codex_json" > "$codex_json.tmp"
+    mv "$codex_json.tmp" "$codex_json"
+    git add "$codex_json"
+  fi
 
   git add "$plugin_json"
   echo "bump-plugin-versions: $plugin $current_version -> $new_version"

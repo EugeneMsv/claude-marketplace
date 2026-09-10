@@ -1,0 +1,7 @@
+# Codex procedure
+
+Use `$CODEX_HOME` (default `~/.codex`). For logs, use the plugin's `PLUGIN_DATA` directory if configured by the host; otherwise `$CODEX_HOME/feedback-loop/`. If that path is not exposed to the skill, ask for or locate the installed plugin data path; do not read Claude logs by default. Logs include `runtime`, `session_id`, `tool`, and `command`; prompt logging defaults on, matching the existing Claude plugin; set `FEEDBACK_LOOP_LOG_PROMPTS=0` to disable it.
+
+Inspect recent task history available through the host, global/project AGENTS.md, and only their explicitly referenced instruction files. Prefer topic-specific referenced files for recurring guidance. Do not edit memories SQLite databases or assume `.codex/rules/*.md` is auto-loaded: `.rules` files contain executable permission rules. Require repeated evidence or an explicit user preference. Propose additions/removals with exact destination, existing text, new text, and one evidence reference. Ordinary preferences belong in AGENTS.md or its referenced documents. Permission learnings go through the native policy review below.
+
+For automatic review, preserve the sandbox and built-in policy. `[auto_review].policy` replaces policy rather than appending to it; do not overwrite it unless the complete active policy is available and the user approves the resulting full replacement. Behavioral AGENTS.md guidance is not equivalent to an enforced permission. Store temporary artifacts under `.Codex/feedback-loop/` unless project instructions override it.

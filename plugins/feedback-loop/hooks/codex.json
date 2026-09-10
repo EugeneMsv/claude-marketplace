@@ -1,12 +1,11 @@
 {
-  "description": "Feedback Loop — logs tool usage, prompts, and failures for permission and rule refinement",
   "hooks": {
     "UserPromptSubmit": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/feedback-loop/prompt-detector.sh",
+            "command": "python3 \"${PLUGIN_ROOT}/hooks/feedback-loop/prompt-detector.py\"",
             "timeout": 10
           }
         ]
@@ -14,23 +13,21 @@
     ],
     "PreToolUse": [
       {
-        "matcher": ".*",
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/feedback-loop/tool-detector.sh",
+            "command": "python3 \"${PLUGIN_ROOT}/hooks/feedback-loop/tool-detector.py\"",
             "timeout": 10
           }
         ]
       }
     ],
-    "PostToolUseFailure": [
+    "PostToolUse": [
       {
-        "matcher": ".*",
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/feedback-loop/fail-detector.sh",
+            "command": "python3 \"${PLUGIN_ROOT}/hooks/feedback-loop/fail-detector.py\"",
             "timeout": 10
           }
         ]

@@ -17,7 +17,7 @@ Performs a senior engineer code review against the repo's actual default branch 
 5. Shows model/domain/DTO changes as a coloured diff tree (🔴 removed, 🟢 added, 🔵 changed, ⚪ unchanged)
 6. Reviews each major change for logic, performance, security, SOLID violations, and test coverage
 7. Produces a scored review (0–100) with copy-ready PR notes
-8. Exports the full review to a markdown file in `.claude/code-review/`
+8. Exports the full review to a markdown file in the selected runtime’s artifact directory
 
 **Rules:**
 - Never posts to GitLab unless explicitly instructed
@@ -37,10 +37,10 @@ Interactively resolves GitLab MR review comments one by one:
 2. Fetches all discussions via the GitLab discussions API (handles >20 comments, unlike `glab mr view --comments`)
 3. Enriches each inline comment with surrounding code context
 4. Lets you select which comments to address
-5. Launches Plan agents in parallel for all selected comments
+5. Plans each selected comment, delegating only when supported and authorized
 6. Works through each plan sequentially: code changes → tests → format → verify → commit
-7. Posts an AI-labelled reply to the GitLab discussion thread after each commit
-8. Resolves the discussion via the GitLab API
+7. Posts an AI-labelled reply when explicitly authorized
+8. Resolves the discussion when authorized
 
 **Commit format:**
 ```
@@ -57,3 +57,7 @@ Resolves comment #<id> on MR !<number>
 ```bash
 claude plugin install code-sentinel@eug-msv-claude-marketplace
 ```
+
+## Codex support
+
+Both manifests share the same skills. Each skill loads only its host-specific reference under `references/codex.md` or `references/claude.md`. The code-review criteria remain shared. Codex artifacts use `.Codex/<skill>/`; Claude artifacts use `.claude/<skill>/`, subject to project instructions.

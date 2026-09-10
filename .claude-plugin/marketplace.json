@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "version": "0.1.41",
+  "version": "0.1.42",
   "name": "eug-msv-claude-marketplace",
   "description": "Plugin marketplace for Claude Code from Eugene Moiseev",
   "updated": "2026-09-09",
@@ -47,7 +47,7 @@
       "name": "feedback-loop",
       "source": "./plugins/feedback-loop",
       "description": "Feedback Loop — monitors tool usage, prompts, and failures; refines permissions, rules, and memory",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "author": {
         "name": "Eugene Moiseev"
       },
@@ -66,7 +66,7 @@
       "name": "plan-guard",
       "source": "./plugins/plan-guard",
       "description": "Plan Guard — enforces plan mode discipline, scores incoming prompt quality, syncs plans to projects, and cleans up old plan files",
-      "version": "0.2.9",
+      "version": "0.2.10",
       "author": {
         "name": "Eugene Moiseev"
       },
@@ -83,7 +83,7 @@
       "name": "code-sentinel",
       "source": "./plugins/code-sentinel",
       "description": "Code Sentinel — expert code review with flow diagrams and interactive MR comment resolution",
-      "version": "0.1.5",
+      "version": "0.1.6",
       "author": {
         "name": "Eugene Moiseev"
       },
@@ -135,7 +135,7 @@
       "name": "permissions-juditor",
       "source": "./plugins/permissions-juditor",
       "description": "Permissions Juditor — Sonnet-based security classification auto-clears safe shell commands (python3 today) and opted-in MCP tool calls that would otherwise require manual approval",
-      "version": "0.1.16",
+      "version": "0.1.17",
       "author": {
         "name": "Eugene Moiseev"
       },

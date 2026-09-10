@@ -559,3 +559,6 @@ target/
 
 # OS generated files
 .Trash-*
+
+# Codex temporary work and validation environments
+.Codex/

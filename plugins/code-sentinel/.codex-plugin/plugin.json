@@ -1,0 +1,25 @@
+{
+  "name": "code-sentinel",
+  "version": "0.1.6",
+  "description": "Code Sentinel — expert code review with flow diagrams and interactive MR comment resolution",
+  "author": {
+    "name": "Marketplace contributors"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Code Sentinel",
+    "shortDescription": "Code review and review-feedback resolution",
+    "longDescription": "Code Sentinel — expert code review with flow diagrams and interactive MR comment resolution",
+    "developerName": "Marketplace contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Review my branch",
+      "Address merge request comments"
+    ]
+  }
+}

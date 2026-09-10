@@ -41,6 +41,7 @@ from datetime import datetime
 from pathlib import Path
 
 from anthropic_client import AnthropicClient, EFFORT_LEVELS
+from agent_runtime import runtime_name, data_dir
 
 # --- Scope: which commands/MCP tools this hook actually judges -------------
 
@@ -79,9 +80,11 @@ LEADING_WRAPPER_TOKENS = ("sudo", "time", "nice", "nohup")
 # fake "segment", which could then falsely match a watched pattern.
 SEGMENT_BOUNDARY_TOKENS = {"|", "||", "&", "&&", ";", "(", ")"}
 
-# --- Reference-rules context (from the user's own Claude Code settings) ----
+# --- Shared prompt-policy source for BOTH runtimes ------------------------
+# Intentionally independent of AGENT_RUNTIME/CODEX_HOME. Keep policy loading
+# centralized here so a separate source can be introduced later if requested.
 
-SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
+SETTINGS_PATH = Path(os.environ.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")) / "settings.json"
 
 # --- Model + API call -------------------------------------------------------
 
@@ -330,7 +333,7 @@ Working directory: {cwd}
 
 # --- Logging -----------------------------------------------------------------
 
-LOG_PATH = Path.home() / ".claude" / "permissions-juditor" / "decisions.jsonl"
+LOG_PATH = SETTINGS_PATH.parent / "permissions-juditor" / "decisions.jsonl"
 
 # --- Optional bashlex segmenter dependency ------------------------------------
 
@@ -341,7 +344,7 @@ LOG_PATH = Path.home() / ".claude" / "permissions-juditor" / "decisions.jsonl"
 # PERMISSIONS_JUDITOR_SEGMENTER=bashlex, is looked up here in an isolated
 # per-user venv instead of the interpreter's own site-packages. See
 # _import_bashlex().
-BASHLEX_VENV_DIR = Path.home() / ".claude" / "permissions-juditor" / "venv"
+BASHLEX_VENV_DIR = SETTINGS_PATH.parent / "permissions-juditor" / "venv"
 
 
 def _import_bashlex():
@@ -734,7 +737,8 @@ def _log(record: dict) -> None:
     """Append one JSONL line; best-effort, swallows I/O errors so a logging
     failure never suppresses the actual decision."""
     try:
-        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        log_path = data_dir("permissions-juditor") / "decisions.jsonl" if runtime_name() == "codex" else LOG_PATH
+        log_path.parent.mkdir(parents=True, exist_ok=True)
         remaining = {"timestamp": datetime.now().isoformat(timespec="seconds"), **record}
         ordered = {}
         for key in LOG_FIELD_ORDER:
@@ -742,13 +746,25 @@ def _log(record: dict) -> None:
                 ordered[key] = remaining.pop(key)
         ordered.update(remaining)
         line = json.dumps(ordered, ensure_ascii=False)
-        with open(LOG_PATH, "a", encoding="utf-8") as handle:
+        with open(log_path, "a", encoding="utf-8") as handle:
             handle.write(line + "\n")
     except (OSError, TypeError, ValueError):
         pass
 
 
 def _decision_output(behavior: str, message: str) -> dict:
+    if runtime_name() == "codex":
+        # Codex has no PermissionRequest "ask" decision. No override resumes
+        # its configured approval flow; systemMessage preserves the explanation.
+        if behavior == "ask":
+            return {"systemMessage": "[permissions-juditor] Review required: " + message}
+        decision = {"behavior": behavior}
+        if behavior == "deny":
+            decision["message"] = message
+        output = {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}
+        if behavior == "allow" and message:
+            output["systemMessage"] = "[permissions-juditor] " + message
+        return output
     return {
         "hookSpecificOutput": {
             "hookEventName": "PermissionRequest",
@@ -765,6 +781,10 @@ def run(raw_input: str) -> dict:
     except (json.JSONDecodeError, TypeError):
         _log({"session_id": None, "command": None, "cwd": None, "outcome": "error", "error": "malformed_json"})
         return {}
+
+    if not isinstance(hook_input, dict):
+        return {}
+    runtime_name()  # validate selection; both hosts use the same classifier below
 
     tool_name = hook_input.get("tool_name")
     tool_input = hook_input.get("tool_input")
