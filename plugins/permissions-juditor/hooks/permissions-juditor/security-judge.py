@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
-"""PermissionRequest hook (Bash) — Sonnet-based security classification.
+"""PermissionRequest hook (Bash + MCP tools) — Sonnet-based security classification.
 
-Fires on every Bash PermissionRequest (see hooks.json — no command-prefix
-filter there). Scope is controlled here, via PERMISSIONS_JUDITOR_WATCHED_COMMANDS:
-unset defaults to python3 only; set to "" disables the plugin entirely (no
-API calls at all); a comma-separated list covers exactly those entries. This
-lives in the script rather than hooks.json so it can change without a
-Claude Code restart (hooks.json is only read at session start).
+Fires on every Bash and MCP-tool (`mcp__<server>__<tool>`) PermissionRequest
+(see hooks.json's `Bash|mcp__.*` matcher — no command/tool-name filter there).
+Scope is controlled here, via PERMISSIONS_JUDITOR_WATCHED_COMMANDS: unset
+defaults to python3 only; set to "" disables the plugin entirely (no API
+calls at all); a comma-separated list of glob patterns covers exactly those
+entries — the SAME list covers both Bash command prefixes (e.g. "python3",
+"git push") and MCP tool-name patterns (e.g. "mcp__atlassian__*"). A Bash
+command is matched segment-by-segment (see is_watched_command); an MCP call
+is matched as one whole tool_name string (see is_watched_mcp_tool) - no MCP
+tool is watched by default, so adding one is an explicit opt-in per tool or
+server. This lives in the script rather than hooks.json so it can change
+without a Claude Code restart (hooks.json is only read at session start).
 
-For a watched command, calls the Sonnet model with a forced tool call
-(guaranteed-schema output — see AnthropicClient.complete_with_tool) asking
-for one of allow/ask/deny plus a reasoning string, maps that to the
+For a watched Bash command or MCP tool call, calls the Sonnet model with a
+forced tool call (guaranteed-schema output — see AnthropicClient.complete_with_tool)
+asking for one of allow/ask/deny plus a reasoning string, maps that to the
 PermissionRequest decision shape, and appends one JSONL line per invocation
 to ~/.claude/permissions-juditor/decisions.jsonl — every invocation, not just
 the ones that reach a real decision, so the log is a complete audit trail of
@@ -19,8 +25,8 @@ what this hook saw and did.
 Fail-open: any error (missing credentials, malformed input, network failure,
 unexpected model output) returns {} — no decision override — so the user
 still gets Claude Code's normal permission prompt, exactly as if this plugin
-weren't installed. This hook must never be the reason a command is blocked
-or delayed beyond the model call itself.
+weren't installed. This hook must never be the reason a command or tool call
+is blocked or delayed beyond the model call itself.
 """
 from __future__ import annotations
 
@@ -36,10 +42,14 @@ from pathlib import Path
 
 from anthropic_client import AnthropicClient, EFFORT_LEVELS
 
-# --- Scope: which commands this hook actually judges -----------------------
+# --- Scope: which commands/MCP tools this hook actually judges -------------
 
 WATCHED_COMMANDS_ENV_VAR = "PERMISSIONS_JUDITOR_WATCHED_COMMANDS"
-DEFAULT_WATCHED_COMMANDS = ("python3",)
+DEFAULT_WATCHED_COMMANDS = ("python3",)  # no MCP tool patterns watched by default
+
+# MCP tool names are always "mcp__<server>__<tool>" (double underscore) - the
+# same convention bash-brief's build_mcp_subject() relies on.
+MCP_TOOL_PREFIX = "mcp__"
 
 # Which segmenter identifies "the actual command(s) in this Bash string" for
 # watched-pattern matching. "shlex" (default) is the original flat
@@ -87,9 +97,9 @@ API_TIMEOUT = 20
 
 TOOL_NAME = "classify_command_security"
 TOOL_DESCRIPTION = (
-    "Classify the security risk of a shell command about to run on the user's own "
-    "machine, and decide whether to allow it without review, ask a human first, or "
-    "deny it outright."
+    "Classify the security risk of a shell command or MCP tool call about to run on the "
+    "user's own machine or a connected service, and decide whether to allow it without "
+    "review, ask a human first, or deny it outright."
 )
 INPUT_SCHEMA = {
     "type": "object",
@@ -113,6 +123,12 @@ INPUT_SCHEMA = {
 MAX_TOKENS = 160
 MAX_COMMAND_CHARS = 4000
 
+# Bounds how much of an MCP tool's raw JSON params get embedded in the prompt
+# and the decision log - unlike a Bash command string, MCP params can be
+# arbitrarily large/free-form (SQL text, file contents, whole JSON blobs).
+# Mirrors bash-brief's own MAX_MCP_PARAMS_CHARS.
+MAX_MCP_PARAMS_CHARS = 2000
+
 # Static instructions plus reference-rules context, sent as the request's
 # system block rather than folded into the user message. It's
 # byte-identical across repeated calls within a session unless settings.json
@@ -122,11 +138,12 @@ MAX_COMMAND_CHARS = 4000
 # and latency on it again. Below the model's ~1,024-token cache minimum this
 # marker is simply a no-op, not an error.
 SYSTEM_TEMPLATE = """\
-You are a security judge deciding whether a shell command should run without human review,
-should be reviewed by a human before running, or should be blocked outright.
+You are a security judge deciding whether a shell command or MCP tool call should run
+without human review, should be reviewed by a human before running, or should be blocked
+outright.
 
-Reference — this environment's existing Bash permission rules, from its Claude Code settings
-(context only, see "How to use this reference" below):
+Reference — this environment's existing permission rules for this kind of call, from its
+Claude Code settings (context only, see "How to use this reference" below):
 - Deny rules: {deny_rules}
   Additional deny-leaning suggestion, from this environment's own auto-mode policy: {hard_deny}
 - Ask rules: {ask_rules}
@@ -139,16 +156,16 @@ hostname, GCP project, login-path, or file path named in the command is producti
 non-production: {environment}
 
 How to use this reference:
-- Deny rules AND their additional suggestion are authoritative: if the command matches, or does
-something functionally equivalent to, either one, your decision MUST be "deny".
-- Ask rules AND their additional suggestion are authoritative for "ask": if the command matches,
-or does something functionally equivalent to, either one, your decision MUST be "ask" at
-minimum - never "allow" on that basis alone, even if the command would otherwise look safe.
+- Deny rules AND their additional suggestion are authoritative: if the command or tool call
+matches, or does something functionally equivalent to, either one, your decision MUST be "deny".
+- Ask rules AND their additional suggestion are authoritative for "ask": if the command or tool
+call matches, or does something functionally equivalent to, either one, your decision MUST be
+"ask" at minimum - never "allow" on that basis alone, even if it would otherwise look safe.
 - Allow rules and their additional suggestion are NOT a rulebook to replicate. Do not look up
-whether the command happens to match an ask rule and default to "ask" because of that alone.
-Judge the command on its actual merits using the policy below - our aim is to reduce unnecessary
-interruptions, so prefer "allow" whenever you are genuinely confident the command is safe, even
-if a static ask rule would otherwise have caught it.
+whether the command or tool call happens to match an ask rule and default to "ask" because of
+that alone. Judge it on its actual merits using the policy below - our aim is to reduce
+unnecessary interruptions, so prefer "allow" whenever you are genuinely confident it's safe,
+even if a static ask rule would otherwise have caught it.
 - Security still comes first: this leniency only applies when you are actually confident.
 Real uncertainty or any concrete risk factor still means "ask" or "deny" - never stretch to
 "allow" just to avoid prompting the user.
@@ -157,21 +174,70 @@ Classify into exactly one of three decisions:
 
 - "allow": Safe to run without human review. Read-only, informational, or clearly benign
 local operations - pure computation, printing/logging, reading files the user already has
-access to, running the user's own scripts/tests, listing or inspecting local state.
-- "ask": Genuinely ambiguous, or has a real but bounded side effect a human should glance at
-before it runs - writing or modifying local files, installing packages, starting a local
-network listener, making network calls to an expected/known host.
+access to, running the user's own scripts/tests, listing or inspecting local state, or an
+MCP tool call whose parameters show it only reads, queries, lists, or searches data (e.g. a
+SQL parameter that is a plain SELECT reasonably scoped in time/row count) without changing
+anything.
+- "ask": Genuinely ambiguous, or has a real but bounded, non-destructive side effect a human
+should glance at before it runs - writing or modifying local files, installing packages,
+starting a local network listener, making network calls to an expected/known host, an MCP
+tool call whose parameters show it creates, edits, or sends data in a connected external
+system without destroying anything (e.g. posting a message, filing a ticket, editing a
+document's fields, a SQL UPDATE/INSERT scoped to specific rows), a read-only SQL query
+that scans a long time range (months or years, or no date filter at all) on a large table -
+costly even though it changes nothing, and a LIMIT clause on the returned rows does not
+change this - or a read-only metrics/observability query (e.g. Grafana) whose time range
+spans more than about a week, which risks overloading the backend the same way.
 - "deny": Clearly destructive, exfiltrates data, escalates privileges, disables security
 controls, obfuscates its own behavior (e.g. base64/hex-encoded payloads, dynamic code
-execution from a remote source), or targets credentials, secrets, or sensitive system paths.
+execution from a remote source), targets credentials, secrets, or sensitive system paths, or
+an MCP tool call whose parameters show a destructive operation - deleting or dropping a
+resource (page, issue, channel, repository, database table), a SQL DROP/TRUNCATE/DELETE or an
+UPDATE with no narrowing filter, sending communications on the user's behalf without clear
+intent, or exfiltrating sensitive data to an external destination.
 
 Rules:
-- Judge only what THIS command actually does - do not assume unstated intent, and do not
-speculate about what a human operator might do next.
+- Judge only what THIS command or tool call actually does - do not assume unstated intent,
+and do not speculate about what a human operator might do next.
 - Do not hedge in your reasoning ("this could potentially be risky") - commit to a decision
 and state the specific, concrete risk factor you observed (or its absence).
 - A command can be denied even if it superficially looks like a normal python3 invocation -
 judge the actual arguments and any inline code, not just the interpreter name.
+- For an MCP tool call, the tool/server name alone is rarely enough - dig into the actual
+parameters for the specific risk signal, the way you would for a shell command's arguments:
+  - A SQL/query-language parameter: read the statement itself. DROP/TRUNCATE/DELETE, or an
+  UPDATE with no (or an overly broad) WHERE clause, is destructive and must be denied even if
+  the tool is named something generic like "execute_query" - a plain SELECT is allow, a
+  narrowly-scoped INSERT/UPDATE is ask.
+  - A read-only query (SELECT or similar) that scans a long time range - no date/timestamp
+  filter at all, or one spanning multiple months or years - against what looks like a
+  sizeable/production table is a resource-cost risk even though nothing is written or
+  deleted: ask, not allow. A LIMIT clause does NOT change this - it only bounds the rows
+  returned, not the range the engine must scan to find them, so a long/missing date filter
+  still means ask even with LIMIT 1 attached. Only a query scoped to a single day/week/small
+  range stays allow.
+  - Querying a table's partitions metadata (Trino/Hive `"table$partitions"` syntax, e.g.
+  `SELECT * FROM "orders$partitions"`) is a cheap catalog/metadata lookup, not a scan of the
+  table's actual row data - allow, even with no WHERE clause and regardless of how many
+  partitions exist. Don't confuse this with the real cost driver above: a normal SELECT
+  against the table itself filtered by a wide partition-key range (e.g. `WHERE dt BETWEEN
+  '2020-01-01' AND '2024-12-31'`) still scans that whole range and is still ask.
+  - A metrics/observability tool's time-range parameters (e.g. Grafana's `from`/`to` or
+  `start`/`end`) are the same resource-cost risk as a long SQL scan, even though the call is
+  read-only: compute the actual span between the two bounds and treat anything over ~7 days
+  as ask, regardless of how the range is expressed - a relative range (`now-30d`, `now-90d`)
+  and a pair of explicit absolute dates/timestamps more than a week apart (e.g.
+  `"from": "2026-01-01", "to": "2026-02-15"`) are exactly the same risk. Only a span of about
+  a week or less (`now-7d` to `now`, `now-24h`, `now-1h`, or two explicit dates a few days
+  apart) stays allow.
+  - A delete/remove-shaped tool (by name or by an explicit action parameter) is destructive -
+  deny - regardless of how small the target looks, unless the reference deny/ask rules above
+  already cover it more specifically.
+  - A create/edit/send parameter (message text, ticket fields, document body) is ask, not
+  deny, as long as nothing is being destroyed and the destination is an expected system.
+  - A message/content parameter being sent externally (Slack, email, a public page) should be
+  checked for sensitive data (credentials, internal-only identifiers, PII) leaving the
+  organization - that shifts an otherwise-ask "send" action to deny.
 
 Examples:
 
@@ -197,7 +263,52 @@ Decision: allow
 Reasoning: Runs the user's own local script against a local config file; no indication of
 destructive or exfiltrating behavior.
 
-Now classify the command given in this message by calling the classify_command_security tool.
+Command: MCP tool `mcp__atlassian__getConfluencePage` invoked with parameters: {{"pageId": "123456"}}
+Decision: allow
+Reasoning: Read-only fetch of a single Confluence page - no data is modified or sent anywhere.
+
+Command: MCP tool `mcp__trino__execute_query` invoked with parameters: {{"query": "SELECT status, count(*) FROM orders WHERE order_date = '2026-09-01' GROUP BY status LIMIT 20"}}
+Decision: allow
+Reasoning: Read-only aggregate scoped to a single day - no data is modified and the scan range is small.
+
+Command: MCP tool `mcp__trino__execute_query` invoked with parameters: {{"query": "SELECT * FROM \\"orders$partitions\\""}}
+Decision: allow
+Reasoning: Queries partition metadata via the $partitions pseudo-table, a cheap catalog lookup, not a scan of the table's row data.
+
+Command: MCP tool `mcp__trino__execute_query` invoked with parameters: {{"query": "SELECT * FROM events WHERE created_at >= '2020-01-01'"}}
+Decision: ask
+Reasoning: Read-only, but the date filter spans roughly six years on a likely large events table - a costly full-range scan worth a glance.
+
+Command: MCP tool `mcp__trino__execute_query` invoked with parameters: {{"query": "SELECT * FROM events WHERE created_at >= '2020-01-01' LIMIT 100"}}
+Decision: ask
+Reasoning: LIMIT only bounds the rows returned, not the roughly six-year scan needed to find them on a likely large table.
+
+Command: MCP tool `mcp__grafana__query_metrics` invoked with parameters: {{"metric": "cpu_usage_percent", "service": "api-gateway", "from": "now-24h", "to": "now"}}
+Decision: allow
+Reasoning: Read-only metric query scoped to the last 24 hours - a small, cheap time range.
+
+Command: MCP tool `mcp__grafana__query_metrics` invoked with parameters: {{"metric": "cpu_usage_percent", "service": "api-gateway", "from": "now-90d", "to": "now"}}
+Decision: ask
+Reasoning: Read-only, but the time range spans roughly 90 days - a costly wide-range query worth a glance.
+
+Command: MCP tool `mcp__grafana__query_metrics` invoked with parameters: {{"metric": "cpu_usage_percent", "service": "api-gateway", "from": "2026-01-01", "to": "2026-02-15"}}
+Decision: ask
+Reasoning: The explicit date range spans about six weeks, well beyond the ~7-day threshold, even though neither bound is relative.
+
+Command: MCP tool `mcp__atlassian__editJiraIssue` invoked with parameters: {{"issueKey": "PROJ-123", "fields": {{"summary": "Updated summary"}}}}
+Decision: ask
+Reasoning: Edits one field on an existing ticket in an external tracker - a bounded, non-destructive update worth a glance.
+
+Command: MCP tool `mcp__trino__execute_query` invoked with parameters: {{"query": "DROP TABLE orders"}}
+Decision: deny
+Reasoning: The query parameter is DDL that permanently destroys a database table, not a read or bounded update.
+
+Command: MCP tool `mcp__confluence__confluence_delete_page` invoked with parameters: {{"pageId": "98765"}}
+Decision: deny
+Reasoning: Permanently deletes a Confluence page - a destructive, hard-to-reverse action regardless of target size.
+
+Now classify the command or tool call given in this message by calling the
+classify_command_security tool.
 """
 
 # The variable part of every call - cwd and the command itself - kept out of
@@ -206,6 +317,15 @@ USER_TEMPLATE = """\
 Working directory: {cwd}
 Command:
 {command}
+"""
+
+# MCP variant of USER_TEMPLATE: subject already carries the tool name and its
+# full parameters (see build_mcp_subject()), so no separate "Command:" label
+# is needed - it would just duplicate the subject's own "MCP tool `X` invoked
+# with parameters: ..." framing.
+MCP_USER_TEMPLATE = """\
+Working directory: {cwd}
+{subject}
 """
 
 # --- Logging -----------------------------------------------------------------
@@ -277,7 +397,11 @@ def resolve_watched_patterns(env: dict | None = None) -> tuple[str, ...]:
     covering nothing (a live kill switch - no script edit, no hooks.json
     change, no Claude Code restart needed to flip it back on). Each resulting
     entry is glob-normalized: auto-suffixed with "*" if it doesn't already
-    contain one, so a plain entry behaves as a prefix match.
+    contain one, so a plain entry behaves as a prefix match. The same
+    resulting tuple is used for both Bash command segments (is_watched_command)
+    and whole MCP tool names (is_watched_mcp_tool) - e.g.
+    "python3,mcp__atlassian__*" watches python3 invocations AND any Atlassian
+    MCP tool call, entirely via this one env var.
     """
     env = env if env is not None else os.environ
     if WATCHED_COMMANDS_ENV_VAR not in env:
@@ -385,9 +509,10 @@ def segment_commands_bashlex(command: str) -> list[str]:
     grammar instead of a flat punctuation-token split, so shell control
     structures and command substitution can't hide a command from watched-
     pattern matching the way they do under segment_commands() - e.g.
-    "for f in a b; do grep ...; done" segments as ["do grep ..."] there
-    (head token "do" isn't stripped, so "grep*" never matches), but here
-    walks into the for-loop's body and yields ["grep ..."] directly.
+    "for f in a b; do grep ... "$f"; done" segments as ["do grep ... $f"]
+    there (head token "do" isn't stripped, so "grep*" never matches), but
+    here walks into the for-loop's body and yields "grep ..." as its own
+    segment.
 
     Recurses into every 'command' node found anywhere in the tree (inside
     for/if/while/until/case bodies, subshells "(...)", brace groups "{...}",
@@ -452,12 +577,32 @@ def is_watched_command(command: str, patterns: tuple[str, ...], env: dict | None
     return any(fnmatch.fnmatch(segment, pattern) for segment in segments for pattern in patterns)
 
 
+def is_watched_mcp_tool(tool_name: str, patterns: tuple[str, ...]) -> bool:
+    """True if tool_name matches ANY watched pattern - the same patterns tuple
+    (from resolve_watched_patterns/PERMISSIONS_JUDITOR_WATCHED_COMMANDS) used
+    for Bash. No segmentation needed: an MCP tool_name (e.g.
+    "mcp__atlassian__search") is already one whole string, not a shell
+    pipeline/chain. The default patterns ("python3*") never match a
+    "mcp__..." name, so no MCP tool is watched unless explicitly added.
+    """
+    return any(fnmatch.fnmatch(tool_name, pattern) for pattern in patterns)
+
+
+def build_mcp_subject(tool_name: str, tool_input: dict) -> str:
+    """Render an MCP tool call as text for the model to classify - mirrors
+    bash-brief's build_mcp_subject(). tool_input already came through
+    json.loads() on hook stdin, so it's always JSON-serializable - no
+    try/except needed."""
+    params = json.dumps(tool_input, ensure_ascii=False)[:MAX_MCP_PARAMS_CHARS]
+    return f"MCP tool `{tool_name}` invoked with parameters: {params}"
+
+
 def _read_settings_json(settings_path: Path | None = None) -> dict:
     """Read and parse settings_path as a JSON object, or {} on any failure.
 
     Never raises: missing file, unreadable file, or malformed JSON all
-    resolve to {}. Shared by load_reference_bash_rules() and
-    load_auto_mode_context(), both of which treat settings.json as optional
+    resolve to {}. Shared by load_reference_bash_rules()/load_reference_mcp_rules()
+    and load_auto_mode_context(), all of which treat settings.json as optional
     reference context rather than a required input.
 
     settings_path defaults to the module-level SETTINGS_PATH, looked up by
@@ -486,6 +631,23 @@ def load_reference_bash_rules(settings_path: Path | None = None) -> dict:
         entries = permissions.get(key)
         entries = entries if isinstance(entries, list) else []
         result[key] = [e for e in entries if isinstance(e, str) and e.startswith("Bash")]
+    return result
+
+
+def load_reference_mcp_rules(settings_path: Path | None = None) -> dict:
+    """Read settings_path's permissions.allow/ask/deny, filtered to mcp__-prefixed
+    entries - Claude Code's raw tool-name format for MCP permission rules (e.g.
+    "mcp__atlassian__createJiraIssue"), unlike Bash's "Bash(...)"-wrapped form.
+    Never raises - reference context only, see load_reference_bash_rules().
+    """
+    permissions = _read_settings_json(settings_path).get("permissions")
+    permissions = permissions if isinstance(permissions, dict) else {}
+
+    result: dict[str, list[str]] = {}
+    for key in ("allow", "ask", "deny"):
+        entries = permissions.get(key)
+        entries = entries if isinstance(entries, list) else []
+        result[key] = [e for e in entries if isinstance(e, str) and e.startswith(MCP_TOOL_PREFIX)]
     return result
 
 
@@ -532,7 +694,11 @@ def _format_prose_list(entries: list[str]) -> str:
 
 def build_system_prompt(reference_rules: dict, auto_mode: dict) -> str:
     """The static instructions + reference-rules block, sent as the request's
-    cacheable system prompt (see SYSTEM_TEMPLATE)."""
+    cacheable system prompt (see SYSTEM_TEMPLATE). reference_rules is either
+    load_reference_bash_rules()'s or load_reference_mcp_rules()'s result,
+    picked by run() based on which kind of call is being judged - each system
+    prompt only ever carries the rules relevant to that one call type, not
+    both, to keep it focused and avoid irrelevant noise."""
     return SYSTEM_TEMPLATE.format(
         deny_rules=_format_rule_list(reference_rules["deny"]),
         ask_rules=_format_rule_list(reference_rules["ask"]),
@@ -545,8 +711,15 @@ def build_system_prompt(reference_rules: dict, auto_mode: dict) -> str:
 
 
 def build_user_prompt(command: str, cwd: str) -> str:
-    """The per-call variable part: cwd and the command itself (see USER_TEMPLATE)."""
+    """The per-call variable part for a Bash command: cwd and the command
+    itself (see USER_TEMPLATE)."""
     return USER_TEMPLATE.format(cwd=cwd, command=command[:MAX_COMMAND_CHARS])
+
+
+def build_mcp_user_prompt(tool_name: str, tool_input: dict, cwd: str) -> str:
+    """The per-call variable part for an MCP tool call: cwd and the rendered
+    subject (see MCP_USER_TEMPLATE/build_mcp_subject)."""
+    return MCP_USER_TEMPLATE.format(cwd=cwd, subject=build_mcp_subject(tool_name, tool_input))
 
 
 # Fields worth scanning at a glance, in display order; everything else
@@ -598,20 +771,30 @@ def run(raw_input: str) -> dict:
     tool_input = tool_input if isinstance(tool_input, dict) else {}
     session_id = hook_input.get("session_id")
     cwd = hook_input.get("cwd", "")
-    command = (tool_input.get("command") or "").strip()
 
-    base = {"session_id": session_id, "command": command[:MAX_COMMAND_CHARS], "cwd": cwd}
+    is_bash = tool_name == "Bash"
+    is_mcp = isinstance(tool_name, str) and tool_name.startswith(MCP_TOOL_PREFIX)
 
-    if tool_name != "Bash":
+    if is_bash:
+        subject = (tool_input.get("command") or "").strip()
+    elif is_mcp:
+        subject = build_mcp_subject(tool_name, tool_input)
+    else:
+        subject = ""
+
+    base = {"session_id": session_id, "tool_name": tool_name, "command": subject[:MAX_COMMAND_CHARS], "cwd": cwd}
+
+    if not is_bash and not is_mcp:
         _log({**base, "outcome": "skip_unsupported_tool"})
         return {}
 
-    if not command:
+    if not subject:
         _log({**base, "outcome": "skip_empty_command"})
         return {}
 
     patterns = resolve_watched_patterns()
-    if not is_watched_command(command, patterns):
+    watched = is_watched_command(subject, patterns) if is_bash else is_watched_mcp_tool(tool_name, patterns)
+    if not watched:
         _log({**base, "outcome": "skip_unwatched_command"})
         return {}
 
@@ -621,11 +804,12 @@ def run(raw_input: str) -> dict:
 
     start = time.monotonic()
     try:
-        reference_rules = load_reference_bash_rules()
+        reference_rules = load_reference_mcp_rules() if is_mcp else load_reference_bash_rules()
         auto_mode = load_auto_mode_context()
+        prompt = build_mcp_user_prompt(tool_name, tool_input, cwd) if is_mcp else build_user_prompt(subject, cwd)
         result = AnthropicClient.from_env(timeout=API_TIMEOUT).complete_with_tool(
             model=resolve_model(),
-            prompt=build_user_prompt(command, cwd),
+            prompt=prompt,
             tool_name=TOOL_NAME,
             tool_description=TOOL_DESCRIPTION,
             input_schema=INPUT_SCHEMA,

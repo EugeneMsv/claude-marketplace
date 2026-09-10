@@ -1,6 +1,6 @@
 # permissions-juditor
 
-Before Claude Code shows you a permission prompt for a Bash command, calls Sonnet with a purpose-written security-classification prompt and lets it decide `allow` (auto-clear, no prompt), `ask` (prompt proceeds, with the model's reasoning attached), or `deny` (blocked, with a reason) — so genuinely safe commands stop interrupting you, while risky ones still get a human decision or are stopped outright.
+Before Claude Code shows you a permission prompt for a Bash command or an MCP tool call, calls Sonnet with a purpose-written security-classification prompt and lets it decide `allow` (auto-clear, no prompt), `ask` (prompt proceeds, with the model's reasoning attached), or `deny` (blocked, with a reason) — so genuinely safe commands stop interrupting you, while risky ones still get a human decision or are stopped outright.
 
 ## What It Does
 
@@ -8,20 +8,36 @@ Before Claude Code shows you a permission prompt for a Bash command, calls Sonne
 
 | Hook | Event | Purpose |
 |---|---|---|
-| `security-judge` | `PermissionRequest` (`Bash`) | Fires only when Claude Code actually needs a permission decision for a Bash command — never for commands an existing `allow` rule already covers. Classifies watched commands via a forced Sonnet tool call and maps the result to a `PermissionRequest` decision. |
+| `security-judge` | `PermissionRequest` (`Bash`, `mcp__.*`) | Fires only when Claude Code actually needs a permission decision — never for a command/tool an existing `allow` rule already covers. Classifies watched commands and MCP tool calls via a forced Sonnet tool call and maps the result to a `PermissionRequest` decision. |
 
 ### Scope: env-var controlled, not config-bound
 
-`hooks.json` matches every `Bash` `PermissionRequest` — it does not filter by command prefix. Actual scope is controlled entirely inside `security-judge.py`, via `PERMISSIONS_JUDITOR_WATCHED_COMMANDS`:
+`hooks.json` matches every `Bash` and `mcp__*` `PermissionRequest` — it does not filter by command prefix or tool name. Actual scope is controlled entirely inside `security-judge.py`, via `PERMISSIONS_JUDITOR_WATCHED_COMMANDS` — **one env var covers both Bash commands and MCP tool calls**, as a single comma-separated list of glob patterns:
 
 | Value | Effect |
 |---|---|
-| *(unset)* | Default: covers `python3` only |
-| `python3,git push,npm install` | Comma-separated list — covers exactly those, each entry auto-suffixed with `*` if it has none |
+| *(unset)* | Default: covers `python3` only — **no MCP tool is scanned until you add one** |
+| `python3,git push,npm install` | Comma-separated list — covers exactly those Bash prefixes, each entry auto-suffixed with `*` if it has none |
+| `python3,mcp__atlassian__*` | Mix Bash prefixes and MCP tool-name globs freely in the same list — this example watches `python3` invocations AND any Atlassian MCP tool call |
+| `mcp__atlassian__createJiraIssue` | An entry with no `*` still auto-suffixes one, but since MCP tool names have no further segments after the tool, this effectively pins one exact tool |
 | `` *(empty string)* | Covers nothing — a live kill switch for the whole plugin |
 | `python3 -m *` | An entry already containing `*` is used exactly as written, for a narrower match |
 
-Because this lives in the script rather than `hooks.json`, changing scope takes effect on the very next Bash call — no plugin edit, no `hooks.json` edit, and no Claude Code restart (unlike `hooks.json` itself, which is only read at session start).
+A Bash command is matched segment-by-segment (see below). An MCP tool call is matched as one whole `tool_name` string (e.g. `mcp__atlassian__search`) against the same pattern list — no segmentation needed, since a tool name has no pipeline/chain structure. Because this lives in the script rather than `hooks.json`, changing scope takes effect on the very next call — no plugin edit, no `hooks.json` edit, and no Claude Code restart (unlike `hooks.json` itself, which is only read at session start).
+
+### MCP tool calls: judged on their actual parameters, not just the tool name
+
+For a watched MCP tool, the classification prompt embeds the tool name and its full JSON parameters (truncated past 2000 characters) — the model is explicitly instructed to dig into the parameters for the real risk signal, the same way it inspects a Bash command's arguments rather than just its interpreter name:
+
+- A SQL/query-language parameter is read for its actual statement: `DROP`/`TRUNCATE`/`DELETE`, or an `UPDATE` with no (or an overly broad) `WHERE`, is **destructive → deny**, even if the tool is generically named `execute_query`. A plain `SELECT` is `allow`; a narrowly-scoped `INSERT`/`UPDATE` is `ask`.
+- A read-only SQL query that scans a long time range — no date/timestamp filter at all, or one spanning multiple months or years — on what looks like a large table is `ask`, not `allow`: nothing is modified, but a full-range scan on a sizeable table is a real resource-cost risk worth a glance before it runs. A `LIMIT` clause does **not** change this — it bounds only the rows returned, not the range the engine scans to find them, so `... WHERE created_at >= '2020-01-01' LIMIT 100` is still `ask`.
+- Querying a table's **partitions metadata** (Trino/Hive `"table$partitions"` syntax, e.g. `SELECT * FROM "orders$partitions"`) is `allow` even with no `WHERE` clause — it's a cheap catalog/metadata lookup, not a scan of the table's actual row data. Don't confuse this with the real cost driver above: a normal `SELECT` against the table itself filtered by a wide partition-key range still scans that whole range and is still `ask`.
+- A **metrics/observability tool's time range** (e.g. Grafana's `from`/`to` or `start`/`end`) is the same resource-cost risk as a long SQL scan, even though the call is read-only. The model computes the actual span between the two bounds regardless of how it's expressed — a relative range (`now-30d`, `now-90d`) or a pair of explicit absolute dates more than a week apart (`"from": "2026-01-01", "to": "2026-02-15"`) are the same risk. About a week or less stays `allow`; anything longer is `ask` — scanning that much metrics/log data can overload the backend.
+- A delete/remove-shaped action (by tool name or an explicit parameter) is **destructive → deny**, regardless of how small the target looks.
+- A create/edit/send action (message text, ticket fields, document body) that doesn't destroy anything is `ask`, not `deny`.
+- A message/content parameter being sent externally (Slack, email, a public page) is checked for sensitive data (credentials, internal identifiers, PII) leaving the organization — that shifts an otherwise-`ask` "send" action to `deny`.
+
+Reference rules for MCP calls come from your own `~/.claude/settings.json` `permissions.allow`/`ask`/`deny` entries, filtered to `mcp__`-prefixed entries (Claude Code's raw tool-name format for MCP rules, e.g. `mcp__atlassian__createJiraIssue` — unlike Bash's `Bash(...)`-wrapped form). Each system prompt only ever carries the rules relevant to the call type being judged — a Bash command's prompt never sees MCP rules and vice versa — to keep it focused.
 
 ### Matching is segment-aware, not whole-string
 
@@ -104,17 +120,18 @@ If none resolve, the hook silently no-ops (logged as `skip_no_credentials`) rath
 
 ## Failure Handling
 
-Missing credentials, network errors, malformed hook input, an unwatched command, or an unexpected/invalid model response all fall through to `{}` — no decision override. The Bash call proceeds through Claude Code's normal permission flow exactly as if this plugin weren't installed; this hook is never the reason a command is blocked or delayed beyond the model call itself.
+Missing credentials, network errors, malformed hook input, an unwatched command/tool, or an unexpected/invalid model response all fall through to `{}` — no decision override. The call proceeds through Claude Code's normal permission flow exactly as if this plugin weren't installed; this hook is never the reason a command or tool call is blocked or delayed beyond the model call itself.
 
 ## Decision Log
 
-Every invocation — not just the ones that reach a real classification — appends one JSONL line to `~/.claude/permissions-juditor/decisions.jsonl`:
+Every invocation — not just the ones that reach a real classification — appends one JSONL line to `~/.claude/permissions-juditor/decisions.jsonl`, for both Bash and MCP:
 
 ```json
-{"timestamp": "2026-08-24T15:44:23", "session_id": "...", "command": "python3 -c \"print(1)\"", "cwd": "/path", "outcome": "decided", "decision": "allow", "elapsed_ms": 842, "reasoning": "Pure computation with no I/O."}
+{"timestamp": "2026-08-24T15:44:23", "session_id": "...", "tool_name": "Bash", "command": "python3 -c \"print(1)\"", "cwd": "/path", "outcome": "decided", "decision": "allow", "elapsed_ms": 842, "reasoning": "Pure computation with no I/O."}
+{"timestamp": "2026-08-24T15:45:10", "session_id": "...", "tool_name": "mcp__atlassian__getConfluencePage", "command": "MCP tool `mcp__atlassian__getConfluencePage` invoked with parameters: {\"pageId\": \"123456\"}", "cwd": "/path", "outcome": "decided", "decision": "allow", "elapsed_ms": 1103, "reasoning": "Read-only page fetch."}
 ```
 
-`outcome` is one of `decided`, `skip_unwatched_command`, `skip_no_credentials`, `skip_unsupported_tool`, `skip_empty_command`, or `error` (with an `error` field describing what failed). `elapsed_ms` is the API call's wall time only (present on `decided` and `error` outcomes) — pull a p50/p95 straight from this log to check the effect of an effort or model change. This is the plugin's audit trail — always on, not gated behind a debug flag.
+`command` holds the Bash command text or, for an MCP call, the rendered `MCP tool \`X\` invoked with parameters: ...` subject. `outcome` is one of `decided`, `skip_unwatched_command`, `skip_no_credentials`, `skip_unsupported_tool`, `skip_empty_command`, or `error` (with an `error` field describing what failed). `elapsed_ms` is the API call's wall time only (present on `decided` and `error` outcomes) — pull a p50/p95 straight from this log to check the effect of an effort or model change. This is the plugin's audit trail — always on, not gated behind a debug flag.
 
 ## Installation
 

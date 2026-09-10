@@ -171,6 +171,14 @@ def test_resolveWatchedPatterns_entryWithExplicitStar_usedAsIs():
     assert judge.resolve_watched_patterns(env) == ("python3 -m *",)
 
 
+def test_resolveWatchedPatterns_mixedBashAndMcpPatterns_parsesEachEntry():
+    """The same env var covers both domains - a Bash prefix and an MCP
+    tool-name glob can sit in the same comma-separated list."""
+    env = {judge.WATCHED_COMMANDS_ENV_VAR: "python3,mcp__atlassian__*"}
+
+    assert judge.resolve_watched_patterns(env) == ("python3*", "mcp__atlassian__*")
+
+
 # --- segment_commands ---------------------------------------------------------
 
 
@@ -223,6 +231,61 @@ def test_isWatchedCommand_trailingFlagsOnDefaultPrefix_matches():
 
 def test_isWatchedCommand_noSegmentMatches_returnsFalse():
     assert judge.is_watched_command("ls -la", ("python3*",)) is False
+
+
+# --- is_watched_mcp_tool --------------------------------------------------------
+
+
+def test_isWatchedMcpTool_matchingPattern_returnsTrue():
+    assert judge.is_watched_mcp_tool("mcp__atlassian__search", ("mcp__atlassian__*",)) is True
+
+
+def test_isWatchedMcpTool_noPatterns_returnsFalse():
+    assert judge.is_watched_mcp_tool("mcp__atlassian__search", ()) is False
+
+
+def test_isWatchedMcpTool_nonMatchingPattern_returnsFalse():
+    assert judge.is_watched_mcp_tool("mcp__slack__slack_send_message", ("mcp__atlassian__*",)) is False
+
+
+def test_isWatchedMcpTool_exactToolNamePattern_matchesOnlyThatTool():
+    patterns = ("mcp__atlassian__createJiraIssue",)
+
+    assert judge.is_watched_mcp_tool("mcp__atlassian__createJiraIssue", patterns) is True
+    assert judge.is_watched_mcp_tool("mcp__atlassian__getConfluencePage", patterns) is False
+
+
+def test_isWatchedMcpTool_defaultBashPattern_neverMatchesMcpTool():
+    """DEFAULT_WATCHED_COMMANDS ("python3*",) must not accidentally watch every
+    MCP tool by default - MCP scanning is opt-in per tool/server."""
+    assert judge.is_watched_mcp_tool("mcp__atlassian__search", judge.resolve_watched_patterns({})) is False
+
+
+# --- build_mcp_subject -----------------------------------------------------------
+
+
+def test_buildMcpSubject_emptyParams_rendersEmptyJsonObject():
+    subject = judge.build_mcp_subject("mcp__trino__list_catalogs", {})
+
+    assert subject == "MCP tool `mcp__trino__list_catalogs` invoked with parameters: {}"
+
+
+def test_buildMcpSubject_typicalParams_rendersToolNameAndJson():
+    tool_input = {"query": "SELECT count(*) FROM orders LIMIT 10", "catalog": "hive"}
+
+    subject = judge.build_mcp_subject("mcp__trino__execute_query", tool_input)
+
+    assert subject.startswith("MCP tool `mcp__trino__execute_query` invoked with parameters: ")
+    assert json.loads(subject.split("parameters: ", 1)[1]) == tool_input
+
+
+def test_buildMcpSubject_oversizedParams_truncatesToMaxChars():
+    tool_input = {"body": "x" * (judge.MAX_MCP_PARAMS_CHARS * 2)}
+
+    subject = judge.build_mcp_subject("mcp__slack__slack_send_message", tool_input)
+
+    params_text = subject.split("parameters: ", 1)[1]
+    assert len(params_text) == judge.MAX_MCP_PARAMS_CHARS
 
 
 # --- resolve_segmenter ---------------------------------------------------------
@@ -485,6 +548,65 @@ def test_loadReferenceBashRules_noPermissionsKey_returnsEmptyLists(tmp_path):
     assert result == {"allow": [], "ask": [], "deny": []}
 
 
+# --- load_reference_mcp_rules ----------------------------------------------------
+
+
+def test_loadReferenceMcpRules_missingFile_returnsEmptyLists(tmp_path):
+    result = judge.load_reference_mcp_rules(tmp_path / "does-not-exist.json")
+
+    assert result == {"allow": [], "ask": [], "deny": []}
+
+
+def test_loadReferenceMcpRules_malformedJson_returnsEmptyLists(tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text("{not valid json")
+
+    result = judge.load_reference_mcp_rules(settings_path)
+
+    assert result == {"allow": [], "ask": [], "deny": []}
+
+
+def test_loadReferenceMcpRules_mixedMcpAndNonMcpEntries_filtersToOnlyMcp(tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "permissions": {
+                    "allow": ["mcp__atlassian__search", "Bash(git status)"],
+                    "ask": ["mcp__atlassian__createJiraIssue", "Edit(*.py)"],
+                    "deny": ["mcp__confluence__confluence_delete_page"],
+                }
+            }
+        )
+    )
+
+    result = judge.load_reference_mcp_rules(settings_path)
+
+    assert result == {
+        "allow": ["mcp__atlassian__search"],
+        "ask": ["mcp__atlassian__createJiraIssue"],
+        "deny": ["mcp__confluence__confluence_delete_page"],
+    }
+
+
+def test_loadReferenceMcpRules_emptyPermissionLists_returnsEmptyLists(tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({"permissions": {"allow": [], "ask": [], "deny": []}}))
+
+    result = judge.load_reference_mcp_rules(settings_path)
+
+    assert result == {"allow": [], "ask": [], "deny": []}
+
+
+def test_loadReferenceMcpRules_noPermissionsKey_returnsEmptyLists(tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({"someOtherKey": True}))
+
+    result = judge.load_reference_mcp_rules(settings_path)
+
+    assert result == {"allow": [], "ask": [], "deny": []}
+
+
 # --- load_auto_mode_context ------------------------------------------------------
 
 _EMPTY_AUTO_MODE = {"environment": [], "allow": [], "soft_deny": [], "hard_deny": []}
@@ -614,6 +736,18 @@ def _hook_input(command, tool_name="Bash", session_id="sess-1", cwd="/tmp/projec
     )
 
 
+def _mcp_hook_input(tool_name, tool_input, session_id="sess-1", cwd="/tmp/project"):
+    return json.dumps(
+        {
+            "hook_event_name": "PermissionRequest",
+            "tool_name": tool_name,
+            "tool_input": tool_input,
+            "session_id": session_id,
+            "cwd": cwd,
+        }
+    )
+
+
 @pytest.fixture(autouse=True)
 def _redirect_settings_path(monkeypatch, tmp_path):
     """Reference-rules loading is covered by its own dedicated tests above -
@@ -690,6 +824,7 @@ def test_run_malformedJson_returnsEmptyAndLogsError(monkeypatch):
 
 
 def test_run_defaultEnv_passesMediumEffortToCompleteWithTool(monkeypatch):
+    monkeypatch.delenv(judge.EFFORT_ENV_VAR, raising=False)
     stub_client = _StubClient(result={"decision": "allow", "reasoning": "pure computation"})
     monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
 
@@ -823,6 +958,177 @@ def test_run_watchedCommand_autoModeContextIncludedInSystemPrompt(monkeypatch, t
     assert "Never run prod ops without asking first" in system_prompt
     assert "Read-only shell inspection is allowed" in system_prompt
     assert "$defaults" not in system_prompt
+
+
+# --- build_system_prompt: MCP long-range-scan guidance ---------------------------
+
+
+def test_buildSystemPrompt_mentionsLongRangeSqlScanGuidance():
+    """Regression guard: a read-only SQL query spanning months/years on a
+    large table must still be steered toward "ask" - the guidance and its
+    few-shot example live as static prose in SYSTEM_TEMPLATE, not behind any
+    formatted placeholder, so nothing else exercises this text."""
+    empty_rules = {"allow": [], "ask": [], "deny": []}
+    empty_auto_mode = {"environment": [], "allow": [], "soft_deny": [], "hard_deny": []}
+
+    system_prompt = judge.build_system_prompt(empty_rules, empty_auto_mode)
+
+    assert "long time range" in system_prompt
+    assert "months or years" in system_prompt
+
+
+def test_buildSystemPrompt_mentionsPartitionsMetadataIsCheapNotAScan():
+    """Regression guard: $partitions catalog lookups must not be confused
+    with a real wide-range data scan - both live as static prose/examples in
+    SYSTEM_TEMPLATE, not behind any formatted placeholder."""
+    empty_rules = {"allow": [], "ask": [], "deny": []}
+    empty_auto_mode = {"environment": [], "allow": [], "soft_deny": [], "hard_deny": []}
+
+    system_prompt = judge.build_system_prompt(empty_rules, empty_auto_mode)
+
+    assert "$partitions" in system_prompt
+    assert 'orders$partitions' in system_prompt
+
+
+def test_buildSystemPrompt_mentionsGrafanaWideTimeRangeGuidance():
+    """Regression guard: a read-only Grafana/observability query spanning
+    more than about a week must still be steered toward "ask"."""
+    empty_rules = {"allow": [], "ask": [], "deny": []}
+    empty_auto_mode = {"environment": [], "allow": [], "soft_deny": [], "hard_deny": []}
+
+    system_prompt = judge.build_system_prompt(empty_rules, empty_auto_mode)
+
+    assert "now-7d" in system_prompt
+    assert "now-90d" in system_prompt
+    assert "regardless of how the range is expressed" in system_prompt
+    assert "2026-01-01" in system_prompt
+
+
+# --- run(): MCP tool path -------------------------------------------------------
+
+
+def test_run_mcpToolWatched_returnsAllowBehaviorAndLogsDecidedWithToolName(monkeypatch):
+    monkeypatch.setenv(judge.WATCHED_COMMANDS_ENV_VAR, "mcp__atlassian__*")
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "read-only fetch"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    result = judge.run(_mcp_hook_input("mcp__atlassian__getConfluencePage", {"pageId": "123456"}))
+
+    assert result["hookSpecificOutput"]["decision"] == {"behavior": "allow", "message": "read-only fetch"}
+    [record] = _log_lines()
+    assert record["outcome"] == "decided"
+    assert record["tool_name"] == "mcp__atlassian__getConfluencePage"
+
+
+def test_run_mcpToolUnwatchedByDefault_returnsEmptyAndLogsSkipUnwatchedCommand(monkeypatch):
+    """No MCP tool is scanned unless explicitly added to
+    PERMISSIONS_JUDITOR_WATCHED_COMMANDS - the default (python3 only) must
+    not silently start judging every MCP call."""
+    monkeypatch.delenv(judge.WATCHED_COMMANDS_ENV_VAR, raising=False)
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True))
+
+    result = judge.run(_mcp_hook_input("mcp__atlassian__getConfluencePage", {"pageId": "123456"}))
+
+    assert result == {}
+    [record] = _log_lines()
+    assert record["outcome"] == "skip_unwatched_command"
+
+
+def test_run_mcpToolNotInWatchedList_returnsEmptyAndLogsSkipUnwatchedCommand(monkeypatch):
+    monkeypatch.setenv(judge.WATCHED_COMMANDS_ENV_VAR, "mcp__atlassian__*")
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True))
+
+    result = judge.run(_mcp_hook_input("mcp__slack__slack_send_message", {"channel": "#general"}))
+
+    assert result == {}
+    [record] = _log_lines()
+    assert record["outcome"] == "skip_unwatched_command"
+
+
+def test_run_mcpToolNoCredentials_returnsEmptyAndLogsSkipNoCredentials(monkeypatch):
+    monkeypatch.setenv(judge.WATCHED_COMMANDS_ENV_VAR, "mcp__atlassian__*")
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(False))
+
+    result = judge.run(_mcp_hook_input("mcp__atlassian__getConfluencePage", {"pageId": "123456"}))
+
+    assert result == {}
+    [record] = _log_lines()
+    assert record["outcome"] == "skip_no_credentials"
+
+
+def test_run_mcpTool_sendsToolNameAndParamsInPromptNotSystem(monkeypatch):
+    """cwd/tool-call subject are the per-call variable part - they belong in
+    the user prompt, never in the cacheable system block. Uses a pageId not
+    reused by any SYSTEM_TEMPLATE few-shot example, so a false-negative match
+    against static example text can't hide a real leak into system."""
+    monkeypatch.setenv(judge.WATCHED_COMMANDS_ENV_VAR, "mcp__atlassian__*")
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "safe"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    judge.run(_mcp_hook_input("mcp__atlassian__getConfluencePage", {"pageId": "unique-page-id-42"}))
+
+    assert "mcp__atlassian__getConfluencePage" in stub_client.received["prompt"]
+    assert "unique-page-id-42" in stub_client.received["prompt"]
+    assert "unique-page-id-42" not in stub_client.received["system"]
+
+
+def test_run_mcpTool_systemPromptUsesMcpReferenceRulesNotBashRules(monkeypatch, tmp_path):
+    """mcp__github__deleteRepository doesn't appear in any SYSTEM_TEMPLATE
+    few-shot example, so a match against static example text can't produce a
+    false pass here (unlike a rule string the template's own examples reuse)."""
+    monkeypatch.setenv(judge.WATCHED_COMMANDS_ENV_VAR, "mcp__atlassian__*")
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "permissions": {
+                    "deny": ["mcp__github__deleteRepository", "Bash(rm -rf *)"],
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(judge, "SETTINGS_PATH", settings_path)
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "safe"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    judge.run(_mcp_hook_input("mcp__atlassian__getConfluencePage", {"pageId": "123456"}))
+
+    assert "mcp__github__deleteRepository" in stub_client.received["system"]
+    assert "Bash(rm -rf *)" not in stub_client.received["system"]
+
+
+def test_run_bashCommand_systemPromptUsesBashReferenceRulesNotMcpRules(monkeypatch, tmp_path):
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "permissions": {
+                    "deny": ["mcp__github__deleteRepository", "Bash(rm -rf *)"],
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(judge, "SETTINGS_PATH", settings_path)
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "safe"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    judge.run(_hook_input("python3 -c 'print(1)'"))
+
+    assert "Bash(rm -rf *)" in stub_client.received["system"]
+    assert "mcp__github__deleteRepository" not in stub_client.received["system"]
+
+
+def test_run_mcpDenyDecision_returnsDenyBehaviorWithMessage(monkeypatch):
+    monkeypatch.setenv(judge.WATCHED_COMMANDS_ENV_VAR, "mcp__slack__*")
+    stub_client = _StubClient(result={"decision": "deny", "reasoning": "sends unsolicited external message"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    result = judge.run(_mcp_hook_input("mcp__slack__slack_send_message", {"channel": "#general", "text": "..."}))
+
+    assert result["hookSpecificOutput"]["decision"] == {
+        "behavior": "deny",
+        "message": "sends unsolicited external message",
+    }
 
 
 def _run_main(hook_input: dict, monkeypatch, capsys) -> dict:
