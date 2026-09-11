@@ -1,57 +1,19 @@
 # plan-guard
 
-Enforces plan mode discipline, syncs plan files to project directories, and helps clean up old plans.
+Shared plugin for Claude Code and Codex. Set `AGENT_RUNTIME=claude|codex`; when unset, PLUGIN_ROOT selects Codex, otherwise Claude is selected. Python 3.11+ is required; plan snapshot locking targets Unix/macOS.
 
-## What It Does
+## Planning
 
-### Hooks
+The shared UserPromptSubmit hook runs only in `permission_mode=plan`. Claude retains its static/optional AI directives from `hooks/plan-guard/references/claude.md`; Codex gets native guidance from `references/codex.md` in the same directory without an extra API call. Guidance cannot switch the host mode or override user/system instructions.
 
-| Hook | Event | Purpose |
-|---|---|---|
-| `plan-mode-enforcer` | UserPromptSubmit | Injects project-specific planning requirements at the start of each prompt in plan mode. Uses the Anthropic API to generate requirements from `CLAUDE.md` + `key-commands.md`; falls back to sensible defaults if no context found. |
-| `prompt-quality-scorer` | UserPromptSubmit | Scores prompt quality against 6 prompting principles while in plan mode and surfaces the weakest points via `systemMessage`. **Disabled by default** — costs an extra model call per prompt. Set `PLAN_GUARD_PROMPT_SCORER_ENABLED=1` (also accepts `true`/`yes`/`on`) to opt in. |
-| `copy-plan-on-change` | PostToolUse (Write/Edit) | Syncs any plan file edited under `~/.claude/plans/` to the current project's `.claude/plans/` directory. Associates plan names to project paths via `~/.claude/plans/.metadata`. |
-| `copy-plan-on-exit` | PostToolUse (ExitPlanMode) | Performs a final sync of the most recent plan file when plan mode exits. |
+## Plan storage and cleanup
 
-### Skills
+Claude retains its global-plan synchronization, metadata, and archive behavior. Codex persists explicit update_plan snapshots in `.Codex/plan-guard/plans/` under the hook cwd, indexed in PLUGIN_DATA or `$CODEX_HOME/plan-guard`. Full narrative plans without update_plan events are not automatically captured. Codex synchronization does not select the newest global plan or parse private transcript schemas.
 
-| Skill | Trigger | Purpose |
-|---|---|---|
-| `cleanup-plans` | "cleanup old plans", `/cleanup-plans [age]` | Deletes global and project-specific plan files older than the specified age (default: `2w`). Cleans metadata entries and `hook.log` lines. |
+The cleanup skill loads only the selected host reference. Its shared Python entry point routes to the appropriate archive implementation. Codex supports --dry-run, collision-safe dated archives, and symlink checks. It never edits Claude storage. Use the same runtime/data directory for capture and cleanup. Claude archival still moves global plans and associated project copies, then updates metadata and trims dated hook log entries; age now uses a precise day interval.
 
-## Plan Sync Behavior
+Codex plugin hooks require trust review before activation. The two manifests share the skill and hook entry points.
 
-- Plans are always synced to the **git repository root** (not the subdirectory Claude was started from)
-- Cross-session isolation: a plan registered for Project A will not sync to Project B
-- Plan-to-project associations are stored in `~/.claude/plans/.metadata` (line format: `plan-name.md:/absolute/path`)
+## Platform hook files
 
-## Plan Mode Enforcer
-
-On each user prompt in plan mode, the hook:
-
-1. Detects build tools in the project (`build.gradle`, `pom.xml`, `package.json`, etc.)
-2. Reads `CLAUDE.md` and `key-commands.md` for context
-3. Calls `claude-haiku` to produce a concise planning requirements message
-4. Falls back to standard defaults if the API call fails
-
-Override the model via `ANTHROPIC_MODEL` env var.
-
-## Installation
-
-```bash
-claude plugin install plan-guard@eug-msv-claude-marketplace
-```
-
-## Debugging
-
-Hook activity is logged to `~/.claude/logs/hook.log`.
-
-```bash
-# Follow live
-tail -f ~/.claude/logs/hook.log
-
-# Enable verbose output
-export CLAUDE_HOOK_LOG_LEVEL=debug
-```
-
-See `hooks/plan-guard/TROUBLESHOOTING.md` for a full debugging guide.
+Each manifest selects a complete `hooks/claude.json` or `hooks/codex.json`. No default `hooks/hooks.json` is present. Both configurations invoke focused Python entry points directly, with host-specific events and root variables. Shared runtime helpers keep data paths separate.

@@ -1,5 +1,0 @@
-{
-  "name": "task-seeder",
-  "version": "0.1.2",
-  "description": "Task Seeder — reminds the agent to consider splitting multi-part prompts into TaskCreate tasks, especially when part of the ask needs exploration/research first"
-}

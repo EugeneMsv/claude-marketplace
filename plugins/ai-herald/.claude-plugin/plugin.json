@@ -1,5 +1,5 @@
 {
   "name": "ai-herald",
-  "version": "0.0.15",
+  "version": "0.0.16",
   "description": "AI Herald — watches every write, announces attribution at commit time"
 }

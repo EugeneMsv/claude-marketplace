@@ -1,0 +1,17 @@
+{
+  "description": "Custom shared security classifier using Claude settings.json as prompt-policy source.",
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "matcher": "Bash|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/hooks/permissions-juditor/security-judge.py\"",
+            "timeout": 25
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -2,6 +2,10 @@
 
 Before a `Bash` call or an MCP tool call runs, adds a one-sentence, high-level technical description of what it does — e.g. `[bash-brief 14:32:07] Reads a local JSON file and extracts the response status field.`
 
+## Compatibility
+
+This plugin supports Claude Code only. Codex support is not currently available.
+
 ## What It Does
 
 ### Hooks

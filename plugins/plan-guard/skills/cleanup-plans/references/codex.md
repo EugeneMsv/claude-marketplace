@@ -1,0 +1,5 @@
+# Codex plan cleanup
+
+This plugin persists explicit successful `update_plan` hook inputs to `<cwd>/.Codex/plan-guard/plans/<project-session-hash>.md`. This is plugin storage, not an assertion about Codex's internal plan format. A project index is stored under PLUGIN_DATA, or `$CODEX_HOME/plan-guard` when PLUGIN_DATA is absent. Use the same data location for capture and cleanup; ask for the installed data path if the skill cannot discover it.
+
+Run the bundled `scripts/archive-plans.py` with `AGENT_RUNTIME=codex` and the resolved PLUGIN_DATA when needed. First use `--dry-run` to show affected plans, then apply within the user's authorization. Age accepts positive Nw/Nd/Nm, default 2w. Only top-level plugin snapshot Markdown files are moved to sibling `archive/YYYY-MM-DD/` folders. Existing archive names get numeric suffixes. Symlinks are skipped/rejected. Logs, Claude plans, and Codex internal session data are not modified. Native narrative plans that never emitted update_plan are not captured; locate explicitly saved plan artifacts separately and do not guess transcript formats.

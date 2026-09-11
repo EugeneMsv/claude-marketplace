@@ -1,5 +1,6 @@
 {
   "name": "plan-guard",
-  "version": "0.2.9",
-  "description": "Plan Guard — enforces plan mode discipline, scores incoming prompt quality, syncs plans to projects, and cleans up old plan files"
+  "version": "0.2.11",
+  "description": "Plan Guard — enforces plan mode discipline, scores incoming prompt quality, syncs plans to projects, and cleans up old plan files",
+  "hooks": "./hooks/claude.json"
 }

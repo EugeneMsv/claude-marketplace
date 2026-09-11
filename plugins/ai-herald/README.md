@@ -2,6 +2,10 @@
 
 Watches every AI write, then announces attribution stats at commit time — injecting AI vs human contribution percentages into git commit messages.
 
+## Compatibility
+
+This plugin supports Claude Code only. Codex support is not currently available.
+
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)

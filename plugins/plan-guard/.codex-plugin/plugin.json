@@ -1,0 +1,24 @@
+{
+  "name": "plan-guard",
+  "version": "0.2.11",
+  "description": "Plan Guard — enforces plan mode discipline, scores incoming prompt quality, syncs plans to projects, and cleans up old plan files",
+  "author": {
+    "name": "Marketplace contributors"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Plan Guard",
+    "shortDescription": "Planning guidance and recoverable plan archives",
+    "longDescription": "Plan Guard — enforces plan mode discipline, scores incoming prompt quality, syncs plans to projects, and cleans up old plan files",
+    "developerName": "Marketplace contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Archive plans older than two weeks"
+    ]
+  },
+  "hooks": "./hooks/codex.json"
+}

@@ -13,6 +13,10 @@ description: |
 ---
 
 # Code Reviewer Skill
+## Runtime integration
+
+Use the current host to select exactly one reference: [Codex](references/codex.md) or [Claude Code](references/claude.md). Read it before starting. It defines artifact paths, planning, and tool access; the review criteria below are shared. Follow explicit user authorization and repository instructions.
+
 
 ## Trigger
 - User requests code review, PR review, or diff review
@@ -74,11 +78,11 @@ You are an expert Senior Software Engineer performing a code review.
         ```
       - Diff from that merge-base to the branch tip (explicit two-step form, not a bare triple-dot shorthand — keeps the merge-base SHA visible as its own auditable step):
         ```bash
-        git diff <merge-base-sha>..origin/<branch> > .claude/code-review/diff-<branch>-<default-branch>.txt
+        git diff <merge-base-sha>..origin/<branch> > <artifact-dir>/diff-<branch>-<default-branch>.txt
         ```
     - **Per-service mode** (original triple-dot approach — sufficient for a single-service repo where default-branch churn is low):
       ```bash
-      git diff origin/<default-branch>...origin/<branch> > .claude/code-review/diff-<branch>-<default-branch>.txt
+      git diff origin/<default-branch>...origin/<branch> > <artifact-dir>/diff-<branch>-<default-branch>.txt
       ```
     - If diff is empty, verify branch exists and has changes
 
@@ -156,13 +160,13 @@ both sub-steps before producing flow diagrams or model diff trees.
 - MUST auto-detect the default branch via `git symbolic-ref refs/remotes/origin/HEAD` (fallback to `main`) — NEVER hardcode `origin/main`
 - In **monorepo mode**, MUST compute the diff via explicit merge-base (`git merge-base origin/<default-branch> origin/<branch>`, then `git diff <merge-base-sha>..origin/<branch>`) — NEVER a bare triple-dot shorthand
 - In **per-service mode**, use the original triple-dot diff (`git diff origin/<default-branch>...origin/<branch>`)
-- MUST store diff and review artifacts under `.claude/code-review/` (not flat in `.claude/`)
+- MUST store diff and review artifacts under `<artifact-dir>/` (not in the artifact root)
 - MUST ask the user for mode (monorepo vs. per-service) when it cannot be confidently inferred, defaulting to monorepo if still unspecified
 - SHOULD attempt Deep Research Context (step 3.5) as best-effort when a Jira key is discoverable in the MR — skip silently (no need to tell the user) when there's no key, no ticket-tracker access, or nothing relevant turns up
 - Confluence search strategy for step 3.5 is out of scope of this skill — if the user hasn't given search terms, default to a Rovo-style search (2-3 calls with varied phrasing/keywords) with a recency check on results
 - MUST skip git worktree creation by default in monorepo mode — use the diff file plus targeted `git show`/Read/Grep instead
 - MUST use git worktree per branch by default in per-service mode
-- MUST use `mcp__sequentialthinking__sequentialthinking` for complex analysis
+- Use sequential-thinking MCP for complex analysis when available
 - MUST reference specific file paths with line numbers
 - MUST include code snippets for top 3 most significant changes
 - MUST verify test coverage for all major changes

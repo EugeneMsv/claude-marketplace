@@ -1,10 +1,13 @@
 ---
 name: msv-mr-nitpick-sentinel
 description: Analyzes and helps address merge request comments interactively. Use when the user asks to "address MR comments", "review MR feedback", "handle reviewer comments", "respond to code review", or "fix review issues".
-version: 0.1.0
 ---
 
 # MR Nitpick Sentinel Skill
+## Runtime integration
+
+Use the current host to select exactly one reference: [Codex](references/codex.md) or [Claude Code](references/claude.md). Read it before starting. It defines artifact paths, planning, and tool access; the review criteria below are shared. Follow explicit user authorization and repository instructions.
+
 
 ## Purpose
 
@@ -42,8 +45,8 @@ Invoke this skill when the user requests:
 1. **Fetch Comments**
    - First, resolve the project path: `glab mr view <mr-number> --output json | python3 -c "import json,sys,urllib.parse; d=json.load(sys.stdin); print(urllib.parse.urlparse(d['web_url']).path.split('/-/')[0].lstrip('/'))"`
    - URL-encode the project path by replacing `/` with `%2F` (e.g., `org/group/repo` → `org%2Fgroup%2Frepo`)
-   - Run: `glab api --paginate "projects/<url-encoded-project-path>/merge_requests/<mr-number>/discussions" > .claude/mr-<number>-comments.json`
-   - Store output in `.claude/mr-<number>-comments.json`
+   - Run: `glab api --paginate "projects/<url-encoded-project-path>/merge_requests/<mr-number>/discussions" > <artifact-dir>/mr-<number>-comments.json`
+   - Store output in `<artifact-dir>/mr-<number>-comments.json`
 
 2. **Parse JSON Structure**
    - The discussions API returns an array of discussion objects; flatten notes: `discussions[].notes[]`
@@ -76,7 +79,7 @@ Invoke this skill when the user requests:
 For each inline comment (DiffNote type):
 
 1. **Read Code Context**
-   - Use Read tool: `Read(file_path, offset=line-3, limit=7)`
+   - Read a bounded, line-numbered range using the runtime reference tools
    - Shows 3 lines before, target line, 3 lines after
 
 2. **Format Context**
@@ -144,46 +147,22 @@ For each inline comment (DiffNote type):
 
 1. **Prepare Context Package**
 
-   Gather information for the Plan agent:
+   Gather information for planning:
    - Comment details: ID, author, text, timestamp
    - Code context: file path, line number, surrounding code (if inline)
    - MR information: number, title, branch
    - Relevant files identified from comment
 
-2. **Launch Plan Agent**
+2. **Create the plan**
 
-   Use Task tool with `subagent_type=Plan`:
-   ```
-   Task(
-     subagent_type="Plan",
-     description="Plan for MR comment #<id>",
-     prompt="""
-     Create implementation plan to address this merge request review comment:
-
-     MR: !<number> - <title>
-     Comment #<id> from @<username>
-     <File: path:line if inline>
-
-     Comment: "<full comment text>"
-
-     <Code context if inline>
-
-     Analyze the comment and create a detailed implementation plan that:
-     - Identifies the reviewer's concern
-     - Determines necessary changes (code, tests, docs)
-     - Lists specific files to modify
-     - Provides step-by-step implementation steps
-     - Specifies verification commands
-     - Estimates effort (Low/Medium/High)
-
-     Follow project coding standards and testing practices.
-     """
-   )
-   ```
+   Use the runtime reference's planning mechanism. Include the reviewer concern,
+   code/test/documentation changes, exact files, implementation steps, verification,
+   and effort estimate. Read-only planning may be delegated only when supported
+   and authorized. Otherwise plan inline; never invent a tool or agent type.
 
 3. **Store Plan**
 
-   The Plan agent will create: `.claude/mr-<number>-comment-<id>-plan.md`
+   Save the plan at: `<artifact-dir>/mr-<number>-comment-<id>-plan.md`
 
    Plan file format:
    ```markdown
@@ -227,9 +206,9 @@ For each inline comment (DiffNote type):
    <Low / Medium / High>
    ```
 
-4. **Launch All Plan Agents**
+4. **Complete planning**
 
-   - Run Plan agents in parallel for all selected comments
+   - Use parallel planning only when supported and authorized; otherwise plan sequentially
    - Wait for all agents to complete
    - Collect plan file paths
 
@@ -242,11 +221,11 @@ For each inline comment (DiffNote type):
    ═══════════════════════════════════════════════════════════
 
    Comment #<id> from @<username>
-   Plan: .claude/mr-<number>-comment-<id>-plan.md
+   Plan: <artifact-dir>/mr-<number>-comment-<id>-plan.md
    Effort: <Low/Medium/High>
 
    Comment #<id> from @<username>
-   Plan: .claude/mr-<number>-comment-<id>-plan.md
+   Plan: <artifact-dir>/mr-<number>-comment-<id>-plan.md
    Effort: <Low/Medium/High>
 
    ═══════════════════════════════════════════════════════════
@@ -264,13 +243,13 @@ For each inline comment (DiffNote type):
 
 1. **Present Plan**
 
-   - Read plan file: `.claude/mr-<number>-comment-<id>-plan.md`
+   - Read plan file: `<artifact-dir>/mr-<number>-comment-<id>-plan.md`
    - Display plan to user
    - Ask: "Ready to work on this comment? (yes/skip/cancel)"
 
 2. **Create Task List**
 
-   Use TaskCreate to build task list from plan's implementation steps:
+   Use the runtime reference task-tracking mechanism to build a task list from plan's implementation steps:
    - Each step becomes a task with description, activeForm
    - Mark first task as `in_progress`
 
@@ -301,7 +280,7 @@ For each inline comment (DiffNote type):
 
 5. **Post Reply to Discussion**
 
-   After the commit, post a concise AI-labelled reply to the GitLab discussion thread.
+   Only when the user explicitly authorizes posting, post a concise AI-labelled reply to the GitLab discussion thread.
    Use the `discussion_id` from the parsed comments JSON (`discussions[].id`).
 
    ```bash
@@ -318,7 +297,7 @@ For each inline comment (DiffNote type):
 
 6. **Resolve Discussion**
 
-   After posting the reply, mark the discussion as resolved:
+   Only when the user authorizes resolving discussions, mark the discussion as resolved:
 
    ```bash
    glab api "projects/<encoded-path>/merge_requests/<mr-number>/discussions/<discussion_id>" \
@@ -350,7 +329,7 @@ For each inline comment (DiffNote type):
    - <N> GitLab discussions resolved
    - All tests passing
 
-   Plan files stored in .claude/ for reference.
+   Plan files stored in the runtime reference artifact directory.
 
    You can now push changes and notify reviewers.
    ═══════════════════════════════════════════════════════════
@@ -362,23 +341,23 @@ For each inline comment (DiffNote type):
 
 - Use `glab api --paginate "projects/<encoded-path>/merge_requests/<number>/discussions"` for comment retrieval — never use `glab mr view --comments` as it silently truncates at 20 results
 - Filter out system comments (`system: true`)
-- Show file/line context for all inline comments using Read tool
-- Store all temporary files in `.claude/` directory
-- Launch Plan agent for each selected comment using Task tool
-- Run all Plan agents in parallel when possible
-- Store each plan as `.claude/mr-<number>-comment-<id>-plan.md`
-- Wait for all Plan agents to complete before proceeding
+- Show file/line context for all inline comments using the runtime reference tools
+- Store all temporary files in the runtime reference artifact directory
+- Create a plan for each selected comment using the runtime reference
+- Delegate parallel planning only when supported and authorized
+- Store each plan as `<artifact-dir>/mr-<number>-comment-<id>-plan.md`
+- Wait for any delegated planning to finish before proceeding
 - Present plan summary to user before starting implementation
 - Work through comments sequentially (one at a time)
-- Create TaskList for each comment's implementation steps
+- Track the tasks for each comment's implementation steps
 - Format code according to project standards before verification
 - Run tests to verify each change
 - One commit per comment addressed
 - Use specified commit message format
 - Display commit result and verification output to user
-- Post an AI-labelled reply to the GitLab discussion after each commit, starting with `*(AI-generated response)*`
-- Resolve the GitLab discussion via PUT after posting the reply
-- Keep plan files in `.claude/` for reference
+- When explicitly authorized, post an AI-labelled reply to the GitLab discussion after each commit, starting with `*(AI-generated response)*`
+- Resolve the GitLab discussion via PUT only when authorized
+- Keep plan files in the runtime reference artifact directory for reference
 
 ### SHOULD
 
@@ -386,7 +365,7 @@ For each inline comment (DiffNote type):
 - Group comments by type (general vs inline)
 - Sort inline comments by file path, then line number
 - Present comments with clear visual separation
-- Launch Plan agents with comprehensive context (comment, code, files)
+- Give delegated planners comprehensive context (comment, code, files)
 - Allow user to skip or cancel at each comment
 - Estimate effort in each plan (Low/Medium/High)
 - Handle edge cases gracefully (empty comments, file not found, etc.)
@@ -398,7 +377,7 @@ For each inline comment (DiffNote type):
 - Make any code changes without explicit user approval
 - Include system-generated comments in display
 - Skip code context for inline comments
-- Skip launching Plan agent for any selected comment
+- Skip planning for any selected comment
 - Start implementation before all plans are created
 - Work on multiple comments simultaneously
 - Create generic commit messages
