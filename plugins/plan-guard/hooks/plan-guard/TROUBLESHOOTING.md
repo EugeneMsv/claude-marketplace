@@ -7,7 +7,6 @@ Use `AGENT_RUNTIME=claude` or `AGENT_RUNTIME=codex`. If unset, PLUGIN_ROOT selec
 ## Entry points
 
 - plan-mode-enforcer.py: loads planning guidance when permission_mode is plan.
-- prompt-quality-scorer.py: optional scorer, disabled by default.
 - plan-sync.py: Claude Write/Edit/ExitPlanMode handling or Codex update_plan snapshots.
 - ../../skills/cleanup-plans/scripts/archive-plans.py: recoverable cleanup with optional --dry-run.
 - plan_storage.py: shared locking, file writes, metadata, and archive functions; not a command entry point.

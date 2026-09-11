@@ -34,3 +34,9 @@ Each detector owns its event filtering and record content. `hook_runner.py` runs
 ## Hook configuration
 
 Each manifest selects one complete file: `.claude-plugin/plugin.json` → `hooks/claude.json`; `.codex-plugin/plugin.json` → `hooks/codex.json`. There is no default `hooks/hooks.json` to merge or execute twice. Both files invoke the same three Python detectors. Claude uses PostToolUseFailure for failures; Codex uses PostToolUse. Each file uses its host's plugin-root variable.
+
+## Codex shell failure limitation
+
+Codex 0.153.4 sends raw command output to PostToolUse without exit status (`ExecCommandToolOutput.post_tool_use_response`), although its code-mode tool result contains exit_code. The detector supports structured status when available, explicit status lines, MCP errors, and command-matched filesystem diagnostics from ls/cat/stat/head/tail/wc/du/rg/grep. It does not treat any occurrence of “error” as failure. Silent nonzero exits, including `false`, cannot be identified from an empty raw payload and are not logged as proven failures.
+
+Source: https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/core/src/tools/context.rs

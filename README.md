@@ -17,8 +17,7 @@ marketplace/
     ├── code-sentinel/
     ├── feedback-loop/
     ├── permissions-juditor/
-    ├── plan-guard/
-    └── task-seeder/
+    └── plan-guard/
 ```
 
 ## Available Plugins
@@ -69,7 +68,7 @@ Enforces plan mode discipline, syncs plan files to project directories, and clea
 
 **Skills:** `cleanup-plans`
 
-**Hooks:** `plan-mode-enforcer` (UserPromptSubmit), `prompt-quality-scorer` (UserPromptSubmit, opt-in via `PLAN_GUARD_PROMPT_SCORER_ENABLED`), `copy-plan-on-change` + `copy-plan-on-exit` (PostToolUse)
+**Hooks:** `plan-mode-enforcer` (UserPromptSubmit), `copy-plan-on-change` + `copy-plan-on-exit` (PostToolUse)
 
 **[Full Documentation →](plugins/plan-guard/README.md)**
 
@@ -96,14 +95,6 @@ Before a Bash permission prompt is shown, calls Sonnet with a security-classific
 **[Full Documentation →](plugins/permissions-juditor/README.md)**
 
 ---
-
-### task-seeder
-
-Reminds the agent that a prompt covering more than one thing — especially anything needing exploration/research first — may be worth splitting into a `Task N: ...` breakdown via `TaskCreate`. Purely static (no model call, no heuristic gating); stays completely silent in plan mode, owned by `plan-guard`.
-
-**Hooks:** `task-breakdown-drafter` (UserPromptSubmit)
-
-**[Full Documentation →](plugins/task-seeder/README.md)**
 
 ## For Users
 

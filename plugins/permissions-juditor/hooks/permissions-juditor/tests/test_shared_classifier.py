@@ -57,11 +57,15 @@ def test_shared_classifier_and_prompt_policy(judge, monkeypatch, tmp_path, runti
         assert value in system
     assert ("Bash(rm -rf *)" if tool == "Bash" else "mcp__example__delete") in system
     assert judge.SETTINGS_PATH == tmp_path / "claude/settings.json"
+    output = result["hookSpecificOutput"]
+    assert output["hookEventName"] == "PermissionRequest"
     if runtime == "codex" and decision == "ask":
-        assert "hookSpecificOutput" not in result
-        assert "classifier reason" in result["systemMessage"]
+        assert output["decision"] == {
+            "behavior": "deny",
+            "message": "[permissions-juditor] Classifier requested review; blocked in Codex: classifier reason",
+        }
     else:
-        assert result["hookSpecificOutput"]["decision"]["behavior"] == decision
+        assert output["decision"]["behavior"] == decision
     log = tmp_path / runtime / "permissions-juditor/decisions.jsonl"
     assert json.loads(log.read_text())["decision"] == decision
 

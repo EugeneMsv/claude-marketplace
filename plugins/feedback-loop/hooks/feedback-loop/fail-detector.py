@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Log Claude failure events and failed Codex results with 90-day retention."""
 import re
+import shlex
+from pathlib import Path
 from hook_runner import append_record, context, run_hook, timestamp, tool_context
 
 
@@ -19,6 +21,25 @@ def failure(event):
         match = re.search(r"(?im)^(?:Process exited with code|Exit code:)\s*(-?\d+)\s*$", response)
         if match and int(match.group(1)) != 0:
             return response
+        # Codex 0.153.4 ExecCommandToolOutput sends raw output only here,
+        # unlike code_mode_result, which includes exit_code. Do not infer a
+        # failure from arbitrary words such as "error" in successful output.
+        inputs = event.get("tool_input") or {}
+        command = inputs.get("command") if isinstance(inputs, dict) else None
+        if event.get("tool_name") == "Bash" and isinstance(command, str):
+            try:
+                argv = shlex.split(command)
+            except ValueError:
+                argv = []
+            executable = Path(argv[0]).name if argv else ""
+            if executable in {"ls", "cat", "stat", "head", "tail", "wc", "du", "rg", "grep"}:
+                diagnostic = re.compile(
+                    r"(?m)^" + re.escape(executable)
+                    + r": .*(?:No such file or directory|Permission denied|Not a directory|Is a directory|Input/output error)(?:.*)$"
+                )
+                match = diagnostic.search(response)
+                if match:
+                    return match.group(0)
     return None
 
 

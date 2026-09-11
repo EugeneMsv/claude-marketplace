@@ -6,8 +6,6 @@ Shared plugin for Claude Code and Codex. Set `AGENT_RUNTIME=claude|codex`; when 
 
 The shared UserPromptSubmit hook runs only in `permission_mode=plan`. Claude retains its static/optional AI directives from `hooks/plan-guard/references/claude.md`; Codex gets native guidance from `references/codex.md` in the same directory without an extra API call. Guidance cannot switch the host mode or override user/system instructions.
 
-The optional prompt-quality scorer is shared and still uses Anthropic when explicitly enabled with PLAN_GUARD_PROMPT_SCORER_ENABLED=1; installing in Codex does not switch that API provider. It is disabled by default in both hosts.
-
 ## Plan storage and cleanup
 
 Claude retains its global-plan synchronization, metadata, and archive behavior. Codex persists explicit update_plan snapshots in `.Codex/plan-guard/plans/` under the hook cwd, indexed in PLUGIN_DATA or `$CODEX_HOME/plan-guard`. Full narrative plans without update_plan events are not automatically captured. Codex synchronization does not select the newest global plan or parse private transcript schemas.

@@ -754,10 +754,11 @@ def _log(record: dict) -> None:
 
 def _decision_output(behavior: str, message: str) -> dict:
     if runtime_name() == "codex":
-        # Codex has no PermissionRequest "ask" decision. No override resumes
-        # its configured approval flow; systemMessage preserves the explanation.
+        # Codex has no PermissionRequest "ask" decision. Block review requests
+        # so the host's automatic reviewer cannot approve them on fallback.
         if behavior == "ask":
-            return {"systemMessage": "[permissions-juditor] Review required: " + message}
+            behavior = "deny"
+            message = "[permissions-juditor] Classifier requested review; blocked in Codex: " + message
         decision = {"behavior": behavior}
         if behavior == "deny":
             decision["message"] = message

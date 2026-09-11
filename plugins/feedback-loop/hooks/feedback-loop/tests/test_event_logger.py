@@ -126,3 +126,27 @@ def test_entrypoint_writes_only_its_log(detector, event, pattern, runtime, monke
     directory = tmp_path / runtime / "feedback-loop"
     assert len(list(directory.glob(pattern))) == 1
     assert len(list(directory.glob("*.jsonl"))) == 1
+
+
+@pytest.mark.parametrize("command,output", [
+    ("ls /example/missing", "ls: /example/missing: No such file or directory\n"),
+    ("cat /example/private", "cat: /example/private: Permission denied\n"),
+    ("/bin/ls /example/missing", "ls: /example/missing: No such file or directory\n"),
+])
+def test_codex_raw_command_diagnostic(command, output, tmp_path):
+    fail.record({"hook_event_name": "PostToolUse", "tool_name": "Bash",
+                 "tool_input": {"command": command}, "tool_response": output})
+    [log] = tmp_path.rglob("fails.jsonl")
+    assert json.loads(log.read_text())["error"] == output.strip()
+
+
+@pytest.mark.parametrize("command,output", [
+    ("echo 'ls: /example/missing: No such file or directory'", "ls: /example/missing: No such file or directory\n"),
+    ("ls .", "README.md\nerror.log\n"),
+    ("false", ""),
+    ("true", ""),
+])
+def test_raw_output_without_matching_diagnostic_is_not_guessed(command, output, tmp_path):
+    fail.record({"hook_event_name": "PostToolUse", "tool_name": "Bash",
+                 "tool_input": {"command": command}, "tool_response": output})
+    assert not list(tmp_path.rglob("fails.jsonl"))

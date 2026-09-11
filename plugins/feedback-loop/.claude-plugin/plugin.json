@@ -1,6 +1,6 @@
 {
   "name": "feedback-loop",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Feedback Loop — monitors tool usage and failures, refines permissions, rules, and memory",
   "hooks": "./hooks/claude.json"
 }
