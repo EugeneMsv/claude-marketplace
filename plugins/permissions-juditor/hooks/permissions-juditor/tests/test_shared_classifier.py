@@ -79,6 +79,10 @@ def test_codex_policy_reloaded_for_next_request(judge, monkeypatch):
 
 @pytest.mark.parametrize("failure", ["credentials", "network", "invalid"])
 def test_codex_classifier_failure_never_allows(judge, monkeypatch, failure):
+    """Missing credentials means the plugin isn't configured, so it defers to the
+    host's normal flow. A network/output failure on a watched command means it
+    meant to judge and couldn't, which becomes an explicit review request -
+    mapped to deny under Codex, which has no "ask". Neither ever allows."""
     monkeypatch.setenv("AGENT_RUNTIME", "codex")
     class Client:
         @staticmethod
@@ -89,7 +93,13 @@ def test_codex_classifier_failure_never_allows(judge, monkeypatch, failure):
             if failure == "network": raise OSError("offline")
             return {"decision": "unknown"}
     monkeypatch.setattr(judge, "AnthropicClient", Client)
-    assert judge.run(json.dumps({"tool_name": "Bash", "tool_input": {"command": "python3 script.py"}})) == {}
+
+    result = judge.run(json.dumps({"tool_name": "Bash", "tool_input": {"command": "python3 script.py"}}))
+
+    if failure == "credentials":
+        assert result == {}
+    else:
+        assert result["hookSpecificOutput"]["decision"]["behavior"] == "deny"
 
 
 def test_invalid_runtime_main_defers(judge):

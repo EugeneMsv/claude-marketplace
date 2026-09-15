@@ -31,6 +31,28 @@ def _redirect_log(monkeypatch, tmp_path):
     monkeypatch.setattr(judge, "LOG_PATH", tmp_path / "decisions.jsonl")
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_env(monkeypatch):
+    """Clear this plugin's own env vars before every test.
+
+    This repo is also the installed plugin source, so the developer's live
+    ~/.claude/settings.json `env` block leaks straight into the test process.
+    Without this, tests that exercise default behaviour silently assert against
+    whatever the machine happens to be configured for - setting
+    PERMISSIONS_JUDITOR_REASONING_ENABLED=false in real settings was enough to
+    fail a schema assertion here. Tests that care about a value set it
+    explicitly via monkeypatch.setenv.
+    """
+    for name in (
+        judge.WATCHED_COMMANDS_ENV_VAR,
+        judge.SEGMENTER_ENV_VAR,
+        judge.MODEL_ENV_VAR,
+        judge.EFFORT_ENV_VAR,
+        judge.REASONING_ENABLED_ENV_VAR,
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 def _log_lines():
     if not judge.LOG_PATH.exists():
         return []
@@ -64,14 +86,15 @@ def test_log_decidedRecord_ordersFieldsTimestampOutcomeDecisionReasoningCommandT
     ]
 
 
-def test_log_decidedRecordWithElapsedMs_ordersElapsedMsBeforeReasoning():
+def test_log_decidedRecordWithTimings_ordersTotalBeforeHttpBeforeReasoning():
     judge._log(
         {
             "session_id": "sess-1",
             "command": "python3 -c 'print(1)'",
             "outcome": "decided",
             "decision": "allow",
-            "elapsed_ms": 842,
+            "total_ms": 901,
+            "http_ms": 842,
             "reasoning": "pure computation",
         }
     )
@@ -81,7 +104,8 @@ def test_log_decidedRecordWithElapsedMs_ordersElapsedMsBeforeReasoning():
         "timestamp",
         "outcome",
         "decision",
-        "elapsed_ms",
+        "total_ms",
+        "http_ms",
         "reasoning",
         "command",
         "session_id",
@@ -772,8 +796,12 @@ def test_run_allowDecision_returnsAllowBehaviorAndLogsDecided(monkeypatch):
     [record] = _log_lines()
     assert record["outcome"] == "decided"
     assert record["decision"] == "allow"
-    assert isinstance(record["elapsed_ms"], int)
-    assert record["elapsed_ms"] >= 0
+    for field in ("total_ms", "http_ms"):
+        assert isinstance(record[field], int)
+        assert record[field] >= 0
+    # total_ms starts at module import, so it can never be shorter than the
+    # round-trip it contains.
+    assert record["total_ms"] >= record["http_ms"]
 
 
 def test_run_watchedCommand_logsCommandUpToMaxCommandCharsNotJustFirst500(monkeypatch):
@@ -884,27 +912,32 @@ def test_run_noCredentials_returnsEmptyAndLogsSkipNoCredentials(monkeypatch):
     assert record["outcome"] == "skip_no_credentials"
 
 
-def test_run_llmRaises_returnsEmptyAndLogsError(monkeypatch):
+def test_run_llmRaises_asksForReviewAndLogsError(monkeypatch):
+    """A watched command this hook meant to judge but couldn't must NOT fall
+    through to {} - that would let the user's own allow rules auto-approve it
+    with no judgment at all."""
     stub_client = _StubClient(raises=RuntimeError("boom"))
     monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
 
     result = judge.run(_hook_input("python3 -c 'print(1)'"))
 
-    assert result == {}
+    assert result["hookSpecificOutput"]["decision"]["behavior"] == "ask"
     [record] = _log_lines()
     assert record["outcome"] == "error"
+    assert record["decision"] == "ask"
     assert "boom" in record["error"]
 
 
-def test_run_invalidDecisionValue_returnsEmptyAndLogsError(monkeypatch):
+def test_run_invalidDecisionValue_asksForReviewAndLogsError(monkeypatch):
     stub_client = _StubClient(result={"decision": "maybe", "reasoning": "unsure"})
     monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
 
     result = judge.run(_hook_input("python3 -c 'print(1)'"))
 
-    assert result == {}
+    assert result["hookSpecificOutput"]["decision"]["behavior"] == "ask"
     [record] = _log_lines()
     assert record["outcome"] == "error"
+    assert record["decision"] == "ask"
     assert "maybe" in record["error"]
 
 
@@ -920,7 +953,9 @@ def test_run_watchedCommand_sendsCommandAndCwdInUserPromptNotSystem(monkeypatch)
     assert "/Users/dev/project" in stub_client.received["prompt"]
     assert "python3 sync_inventory_ledger.py" not in stub_client.received["system"]
     assert stub_client.received["tool_name"] == judge.TOOL_NAME
-    assert stub_client.received["input_schema"] == judge.INPUT_SCHEMA
+    assert stub_client.received["input_schema"] == judge.build_input_schema(
+        judge.DEFAULT_REASONING_ENABLED
+    )
 
 
 def test_run_watchedCommand_cachesSystemPrompt(monkeypatch):
@@ -1164,3 +1199,174 @@ def test_main_unexpectedExceptionInRun_stillPrintsEmptyJson(monkeypatch, capsys)
     judge.main()
 
     assert json.loads(capsys.readouterr().out) == {}
+
+
+# --- Over-long commands / truncated MCP params / shlex-first segmentation ----
+
+
+def test_run_commandOverMaxChars_deniesWithSplitInstructionAndNeverCallsModel(monkeypatch):
+    """Judging only the first MAX_COMMAND_CHARS is a bypass, not a truncation:
+    a benign prefix would clear a destructive tail the model never sees."""
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "looks fine"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+    long_command = "python3 -c \"print('" + ("x" * judge.MAX_COMMAND_CHARS) + "')\""
+    assert len(long_command) > judge.MAX_COMMAND_CHARS
+
+    result = judge.run(_hook_input(long_command))
+
+    decision = result["hookSpecificOutput"]["decision"]
+    assert decision["behavior"] == "deny"
+    assert "Split it into several smaller commands" in decision["message"]
+    assert stub_client.received is None, "must not spend a model call on an unjudgeable command"
+    [record] = _log_lines()
+    assert record["decision"] == "deny"
+    assert record["http_ms"] is None
+
+
+def test_run_commandExactlyAtMaxChars_stillJudgedByModel(monkeypatch):
+    """The cap is the last fully-readable size, so it must not trip the deny."""
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "safe"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+    command = "python3 " + "x" * (judge.MAX_COMMAND_CHARS - len("python3 "))
+    assert len(command) == judge.MAX_COMMAND_CHARS
+
+    result = judge.run(_hook_input(command))
+
+    assert result["hookSpecificOutput"]["decision"]["behavior"] == "allow"
+
+
+def test_run_unwatchedCommandOverMaxChars_staysOutOfScope(monkeypatch):
+    """Length is only this hook's business for commands it actually watches."""
+    monkeypatch.setenv(judge.WATCHED_COMMANDS_ENV_VAR, "docker")
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "safe"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    result = judge.run(_hook_input("echo " + "y" * (judge.MAX_COMMAND_CHARS + 50)))
+
+    assert result == {}
+    [record] = _log_lines()
+    assert record["outcome"] == "skip_unwatched_command"
+
+
+def test_run_mcpParamsOverCapAndModelAllows_escalatesToAsk(monkeypatch):
+    monkeypatch.setenv(judge.WATCHED_COMMANDS_ENV_VAR, "mcp__trino__*")
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "read-only select"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+    huge_query = "SELECT " + ("col, " * judge.MAX_MCP_PARAMS_CHARS) + "1"
+
+    result = judge.run(_mcp_hook_input("mcp__trino__execute_query", {"query": huge_query}))
+
+    decision = result["hookSpecificOutput"]["decision"]
+    assert decision["behavior"] == "ask"
+    assert "never judged" in decision["message"]
+
+
+def test_run_mcpParamsUnderCapAndModelAllows_staysAllow(monkeypatch):
+    monkeypatch.setenv(judge.WATCHED_COMMANDS_ENV_VAR, "mcp__trino__*")
+    stub_client = _StubClient(result={"decision": "allow", "reasoning": "read-only select"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    result = judge.run(_mcp_hook_input("mcp__trino__execute_query", {"query": "SELECT 1"}))
+
+    assert result["hookSpecificOutput"]["decision"]["behavior"] == "allow"
+
+
+def test_isWatchedCommand_bashlexModeShlexHit_doesNotImportBashlex(monkeypatch):
+    """bashlex can only widen the match set, so a shlex hit is already final -
+    the ~55ms lazy venv import must not be paid on that path."""
+    monkeypatch.setenv(judge.SEGMENTER_ENV_VAR, "bashlex")
+    called = []
+    monkeypatch.setattr(judge, "_import_bashlex", lambda: called.append(True))
+
+    assert judge.is_watched_command("python3 script.py", ("python3*",)) is True
+    assert called == []
+
+
+def test_isWatchedCommand_bashlexModeShlexMiss_fallsThroughToBashlex(monkeypatch):
+    """The for-loop body hides the command from shlex's flat split, which is
+    exactly the blind spot bashlex mode exists to cover."""
+    monkeypatch.setenv(judge.SEGMENTER_ENV_VAR, "bashlex")
+    command = 'for f in a b; do grep -n needle "$f"; done'
+
+    assert judge.is_watched_command(command, ("grep*",), env={judge.SEGMENTER_ENV_VAR: "shlex"}) is False
+    assert judge.is_watched_command(command, ("grep*",), env={judge.SEGMENTER_ENV_VAR: "bashlex"}) is True
+
+
+def test_isWatchedCommand_bashlexUnavailableAndShlexMisses_returnsFalseNotRaises(monkeypatch):
+    monkeypatch.setattr(judge, "_import_bashlex", lambda: (_ for _ in ()).throw(ImportError("no bashlex")))
+
+    result = judge.is_watched_command(
+        'for f in a b; do grep -n needle "$f"; done',
+        ("grep*",),
+        env={judge.SEGMENTER_ENV_VAR: "bashlex"},
+    )
+
+    assert result is False
+
+
+# --- reasoning mode (PERMISSIONS_JUDITOR_REASONING) ---------------------------
+
+
+def test_resolveReasoningEnabled_envVarUnset_defaultsToTrue():
+    assert judge.resolve_reasoning_enabled({}) is True
+
+
+@pytest.mark.parametrize("value", ["false", "FALSE", "False", " false "])
+def test_resolveReasoningEnabled_explicitFalse_returnsFalseCaseInsensitively(value):
+    assert judge.resolve_reasoning_enabled({judge.REASONING_ENABLED_ENV_VAR: value}) is False
+
+
+@pytest.mark.parametrize("value", ["true", "TRUE", " True "])
+def test_resolveReasoningEnabled_explicitTrue_returnsTrue(value):
+    assert judge.resolve_reasoning_enabled({judge.REASONING_ENABLED_ENV_VAR: value}) is True
+
+
+@pytest.mark.parametrize("value", ["sideways", "0", "no", "", "1"])
+def test_resolveReasoningEnabled_unrecognizedValue_staysEnabled(value):
+    """Never silently drop the rationale on a typo - anything that isn't an
+    explicit "false" keeps the mode that still explains itself on an ask/deny."""
+    assert judge.resolve_reasoning_enabled({judge.REASONING_ENABLED_ENV_VAR: value}) is True
+
+
+@pytest.mark.parametrize(
+    "reasoning_enabled,expected_order",
+    [
+        (True, ["reasoning", "decision"]),
+        (False, ["decision"]),
+    ],
+)
+def test_buildInputSchema_propertyOrderMatchesSetting(reasoning_enabled, expected_order):
+    """Property order decides generation order, so it IS the feature here: when
+    enabled, the rationale must come first for the verdict to be conditioned
+    on it."""
+    schema = judge.build_input_schema(reasoning_enabled)
+
+    assert list(schema["properties"]) == expected_order
+    assert schema["required"] == expected_order
+    assert schema["additionalProperties"] is False
+
+
+def test_run_reasoningDisabled_sendsDecisionOnlySchemaAndStillReturnsAMessage(monkeypatch):
+    """With reasoning off the model returns no rationale, but an ask/deny is
+    surfaced to the user and must not carry an empty message."""
+    monkeypatch.setenv(judge.REASONING_ENABLED_ENV_VAR, "false")
+    stub_client = _StubClient(result={"decision": "ask"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    result = judge.run(_hook_input("python3 deploy.py"))
+
+    assert list(stub_client.received["input_schema"]["properties"]) == ["decision"]
+    decision = result["hookSpecificOutput"]["decision"]
+    assert decision["behavior"] == "ask"
+    assert decision["message"] == judge.NO_REASONING_MESSAGE
+
+
+def test_run_reasoningEnabled_sendsRationaleFirstAndUsesItAsMessage(monkeypatch):
+    monkeypatch.setenv(judge.REASONING_ENABLED_ENV_VAR, "true")
+    stub_client = _StubClient(result={"reasoning": "opens a listener", "decision": "ask"})
+    monkeypatch.setattr(judge, "AnthropicClient", _stub_anthropic_client(True, stub_client))
+
+    result = judge.run(_hook_input("python3 -m http.server 8000"))
+
+    assert list(stub_client.received["input_schema"]["properties"]) == ["reasoning", "decision"]
+    assert result["hookSpecificOutput"]["decision"]["message"] == "opens a listener"

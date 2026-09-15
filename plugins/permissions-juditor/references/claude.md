@@ -106,7 +106,34 @@ This hook blocks Claude Code's permission dialog, so latency is a real cost — 
 1. `PERMISSIONS_JUDITOR_EFFORT` — if set to one of `max`/`xhigh`/`high`/`medium`/`low`, used as-is. An unset or unrecognized value falls back to the default below rather than raising.
 2. `medium` — the default, balancing latency against reasoning depth on obfuscated/adversarial commands. Lower it to `low` for faster/cheaper calls if you're confident in the classifier on your workload; raise it toward `high` for more scrutiny at the cost of latency.
 
-The request's static instructions and reference-rules block (everything except `cwd`/the command itself) are also sent as a `cache_control: ephemeral` system prompt, so repeated invocations within the cache TTL skip re-processing that prefix — another latency lever independent of effort.
+The request's static instructions and reference-rules block (everything except `cwd`/the command itself) are also sent as a `cache_control: ephemeral` system prompt, so repeated invocations within the cache TTL skip re-processing that prefix. Measured, that prefix is effectively free: dropping all 22,826 characters of it changed p50 by ~73ms, non-monotonically (a 6,000-character prompt measured *faster* than none at all), so the variation is noise. **Trimming the prompt is not a latency lever** — don't spend effort there.
+
+## Rationale Output — `PERMISSIONS_JUDITOR_REASONING_ENABLED`
+
+Whether the model states a rationale next to its verdict. `true` (the default) or `false`; only an explicit, case-insensitive `false` disables it, so a typo keeps the more informative mode rather than silently stripping every explanation.
+
+| Setting | Schema sent | p50 | Message on ask/deny |
+|---|---|---|---|
+| `true` (default) | `reasoning`, then `decision` | ~1890ms | the model's own reason |
+| `false` | `decision` only | ~1430ms | a fixed placeholder |
+
+When enabled, the rationale is ordered **before** the verdict, and that ordering is load-bearing rather than cosmetic: structured-output arguments are generated in schema property order — verified directly by streaming the raw `input_json_delta` fragments — so putting the rationale first makes the verdict conditioned on it. The reverse order is what this hook originally shipped and is strictly worse: the verdict is already committed by the time the rationale is generated, so it pays full decode cost for narration that cannot affect the decision. That reversed shape is deliberately not offered as an option.
+
+Disabling costs ~460ms less at **no measurable accuracy cost** (36 real commands x 3 passes: self-agreement 30/36 rationale-first vs 27/36 verdict-first, a 3-command gap that is not significant at that sample size). What it does cost is the explanation: `deny` is ~1% and `ask` ~11% of verdicts, so you pay the ~460ms on 100% of calls to get a real reason on the ~12% where one is actually surfaced.
+
+### Where the time actually goes
+
+Decomposed live, so latency work targets the right thing. For a ~1720ms call:
+
+| Component | Cost | Reducible by |
+|---|---|---|
+| local work (segmenting, settings, prompt build) | ~1ms | nothing left |
+| dns + tcp + tls | ~160ms | only a persistent connection |
+| cached system prefix | ~0ms | nothing — not a lever |
+| decode (token generation) | ~50-160ms | the rationale switch |
+| everything else (TTFT: queue + prefill) | ~1300ms+ | not reachable client-side |
+
+Time-to-first-token is ~91% of the call, which is why output-shrinking and prompt-trimming both underdeliver relative to intuition.
 
 ## Credential Resolution
 
@@ -120,18 +147,37 @@ If none resolve, the hook silently no-ops (logged as `skip_no_credentials`) rath
 
 ## Failure Handling
 
-Missing credentials, network errors, malformed hook input, an unwatched command/tool, or an unexpected/invalid model response all fall through to `{}` — no decision override. The call proceeds through Claude Code's normal permission flow exactly as if this plugin weren't installed; this hook is never the reason a command or tool call is blocked or delayed beyond the model call itself.
+Failures split on whether the hook actually meant to judge the call.
+
+**Out of scope, or not configured to run** — malformed hook input, an unsupported tool, an unwatched command/tool, or missing credentials — falls through to `{}`, no decision override. The call proceeds through Claude Code's normal permission flow exactly as if this plugin weren't installed.
+
+**A watched call it meant to judge but couldn't** — network failure, HTTP error, or an unexpected/invalid model response — returns an explicit `ask` carrying the reason it failed. `{}` is not safe here: if the user's own `permissions.allow` rules already cover that command, falling through auto-approves it with *no judgment at all*, which is precisely the case this hook exists to catch.
+
+Note the Codex consequence: Codex has no `ask` behavior, so its adapter maps `ask` to `deny` (see [codex.md](codex.md)). Under Codex a transient network error on a watched command therefore *blocks* it rather than deferring. That is deliberate — Codex's fallback is an automatic reviewer that could approve an unjudged call — but it makes retry-on-transient-failure more important there than on Claude.
+
+**A watched Bash command longer than `MAX_COMMAND_CHARS` (15,000)** is denied without a model call at all, with a message telling the caller to split it. Judging only the readable prefix would be a bypass rather than a truncation: a benign prefix would clear a destructive tail the model never saw. Over-long MCP parameters (past `MAX_MCP_PARAMS_CHARS`, 18,000) instead escalate an `allow` to `ask`, since a single large SQL statement cannot be "split" the way a shell command can. Both caps are sized above the largest values observed across real session transcripts, so neither path fires routinely.
 
 ## Decision Log
 
 Every invocation — not just the ones that reach a real classification — appends one JSONL line to `~/.claude/permissions-juditor/decisions.jsonl`, for both Bash and MCP:
 
 ```json
-{"timestamp": "2026-08-24T15:44:23", "session_id": "...", "tool_name": "Bash", "command": "python3 -c \"print(1)\"", "cwd": "/path", "outcome": "decided", "decision": "allow", "elapsed_ms": 842, "reasoning": "Pure computation with no I/O."}
-{"timestamp": "2026-08-24T15:45:10", "session_id": "...", "tool_name": "mcp__atlassian__getConfluencePage", "command": "MCP tool `mcp__atlassian__getConfluencePage` invoked with parameters: {\"pageId\": \"123456\"}", "cwd": "/path", "outcome": "decided", "decision": "allow", "elapsed_ms": 1103, "reasoning": "Read-only page fetch."}
+{"timestamp": "2026-08-24T15:44:23", "session_id": "...", "tool_name": "Bash", "command": "python3 -c \"print(1)\"", "cwd": "/path", "outcome": "decided", "decision": "allow", "total_ms": 1841, "http_ms": 1788, "reasoning": "Pure computation with no I/O."}
+{"timestamp": "2026-08-24T15:45:10", "session_id": "...", "tool_name": "mcp__atlassian__getConfluencePage", "command": "MCP tool `mcp__atlassian__getConfluencePage` invoked with parameters: {\"pageId\": \"123456\"}", "cwd": "/path", "outcome": "decided", "decision": "allow", "total_ms": 1156, "http_ms": 1103, "reasoning": "Read-only page fetch."}
 ```
 
-`command` holds the Bash command text or, for an MCP call, the rendered `MCP tool \`X\` invoked with parameters: ...` subject. `outcome` is one of `decided`, `skip_unwatched_command`, `skip_no_credentials`, `skip_unsupported_tool`, `skip_empty_command`, or `error` (with an `error` field describing what failed). `elapsed_ms` is the API call's wall time only (present on `decided` and `error` outcomes) — pull a p50/p95 straight from this log to check the effect of an effort or model change. This is the plugin's audit trail — always on, not gated behind a debug flag.
+`command` holds the Bash command text or, for an MCP call, the rendered `MCP tool \`X\` invoked with parameters: ...` subject. `outcome` is one of `decided`, `skip_unwatched_command`, `skip_no_credentials`, `skip_unsupported_tool`, `skip_empty_command`, or `error` (with an `error` field describing what failed). This is the plugin's audit trail — always on, not gated behind a debug flag.
+
+Two latency fields, present on `decided` and `error` outcomes, because the gap between them is the actionable part:
+
+| Field | Covers |
+|---|---|
+| `http_ms` | the API call alone — the HTTP round-trip to the model |
+| `total_ms` | everything since the hook module was imported: watched-pattern matching, `settings.json` reads, prompt construction, and the API call |
+
+Measured on real traffic, the round-trip is ~94-99% of `total_ms`, so the two normally sit within a few ms of each other; a widening gap means local work (the lazy `bashlex` venv import is the only candidate large enough to notice). `http_ms` is `null` when no request was made — the over-length deny path, or a failure before the request went out. `total_ms` excludes the interpreter's own startup before the module loads (~25-30ms), which isn't observable from inside the hook.
+
+`http_ms` replaced the earlier `elapsed_ms`, which covered the same span under the old name — lines written before that change still carry `elapsed_ms`, so a script computing percentiles across the cutover has to accept both keys.
 
 ## Installation
 

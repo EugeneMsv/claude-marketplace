@@ -10,7 +10,11 @@ Use AGENT_RUNTIME=codex, or allow PLUGIN_ROOT detection. The Codex manifest sele
 - deny: behavior=deny with the classifier reason.
 - ask: behavior=deny with a message explaining that the classifier requested review and Codex blocked the action, followed by the classifier reason.
 
-Codex does not support a PermissionRequest ask behavior. Mapping ask to deny blocks the action in both manual and automatic approval modes instead of falling back to a reviewer that could approve it. This does not create a confirmation popup or change native approval settings. Claude continues to receive ask unchanged. Missing credentials, malformed responses, and API failures still return no override, never allow.
+Codex does not support a PermissionRequest ask behavior. Mapping ask to deny blocks the action in both manual and automatic approval modes instead of falling back to a reviewer that could approve it. This does not create a confirmation popup or change native approval settings. Claude continues to receive ask unchanged.
+
+Missing credentials still return no override — the plugin is simply not configured, so Codex's normal flow applies. Malformed model responses and API failures on a watched call, however, now produce an explicit ask from the classifier, which this adapter maps to deny. Under Codex those cases therefore **block** the call rather than deferring it; under Claude they surface as a review prompt. Neither ever allows.
+
+The practical consequence is that a transient network error or rate-limit response blocks a watched command under Codex. That is the intended trade — deferring would hand an unjudged call to an automatic reviewer — but it makes retrying transient failures more valuable here than on Claude, and it means a burst of 429s shows up as a burst of blocked commands rather than extra prompts.
 
 Decision logs preserve the classifier's original decision: an ask entry means the Codex adapter returned deny. When diagnosing a block, check the returned PermissionRequest decision as well as the classifier log. Replaying a classifier input does not execute the classified command.
 
