@@ -51,7 +51,7 @@ from datetime import datetime
 from pathlib import Path
 
 from anthropic_client import AnthropicClient, EFFORT_LEVELS
-from agent_runtime import runtime_name, data_dir
+from agent_runtime import runtime_name, agent_home
 
 # Wall-clock origin for the log's total_ms. Captured at module import, so it
 # covers everything this hook does except the interpreter's own boot before
@@ -927,7 +927,7 @@ def _log(record: dict) -> None:
     """Append one JSONL line; best-effort, swallows I/O errors so a logging
     failure never suppresses the actual decision."""
     try:
-        log_path = data_dir("permissions-juditor") / "decisions.jsonl" if runtime_name() == "codex" else LOG_PATH
+        log_path = agent_home() / "permissions-juditor" / "decisions.jsonl" if runtime_name() == "codex" else LOG_PATH
         log_path.parent.mkdir(parents=True, exist_ok=True)
         remaining = {"timestamp": datetime.now().isoformat(timespec="seconds"), **record}
         ordered = {}

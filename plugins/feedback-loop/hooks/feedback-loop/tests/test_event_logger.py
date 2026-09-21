@@ -76,11 +76,56 @@ def test_runtime_override_and_validation():
         runtime_name({"AGENT_RUNTIME": "other"})
 
 
-def test_codex_plugin_data(monkeypatch, tmp_path):
-    monkeypatch.setenv("AGENT_RUNTIME", "codex")
-    monkeypatch.setenv("PLUGIN_DATA", str(tmp_path / "private-data"))
-    tool.record({"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "tool_input": {"command": "patch"}})
-    assert list((tmp_path / "private-data").glob("*.jsonl"))
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
+@pytest.mark.parametrize("custom_home", [False, True])
+@pytest.mark.parametrize("detector,event,pattern", [
+    ("tool", {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+              "tool_input": {"command": "git status"}}, "tool-detector-*.jsonl"),
+    ("prompt", {"hook_event_name": "UserPromptSubmit", "prompt": "hello"}, "prompt-detector-*.jsonl"),
+    ("fail", {"error": "failed"}, "fails.jsonl"),
+])
+def test_entrypoints_across_projects_append_to_shared_home(
+        runtime, custom_home, detector, event, pattern, monkeypatch, tmp_path):
+    import subprocess
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    monkeypatch.delenv("AGENT_RUNTIME")
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(HOOK.parents[1]))
+    if runtime == "codex":
+        monkeypatch.setenv("PLUGIN_ROOT", str(HOOK.parents[1]))
+    home_variable = "CODEX_HOME" if runtime == "codex" else "CLAUDE_CONFIG_DIR"
+    if custom_home:
+        shared_home = tmp_path / runtime
+    else:
+        monkeypatch.delenv(home_variable)
+        shared_home = home / ("." + runtime)
+    monkeypatch.setenv("FEEDBACK_LOOP_LOG_PROMPTS", "1")
+    if detector == "fail":
+        event = {**event, "hook_event_name": "PostToolUse" if runtime == "codex" else "PostToolUseFailure",
+                 "tool_response": {"exit_code": 1, "output": "failed"}}
+
+    for project_name in ["project-a", "project-b"]:
+        project = tmp_path / project_name
+        project.mkdir()
+        monkeypatch.setenv("PLUGIN_DATA", str(project / "plugin-data"))
+        payload = {**event, "cwd": str(project), "session_id": project_name}
+        result = subprocess.run(
+            [sys.executable, str(HOOK / (detector + "-detector.py"))],
+            input=json.dumps(payload), capture_output=True, text=True, cwd=project)
+        assert result.returncode == 0
+        assert json.loads(result.stdout) == {}
+        assert not result.stderr
+        assert not list(project.iterdir())
+
+    [log] = (shared_home / "feedback-loop").glob(pattern)
+    records = [json.loads(line) for line in log.read_text().splitlines()]
+    assert [record["session_id"] for record in records] == ["project-a", "project-b"]
+    assert all(record["runtime"] == runtime for record in records)
+    assert list(tmp_path.rglob("*.jsonl")) == [log]
+    assert log.stat().st_mode & 0o077 == 0
 
 
 def test_failure_retention_preserves_recent_and_unknown(tmp_path):

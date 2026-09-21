@@ -1,6 +1,6 @@
 # Codex procedure
 
-Use `$CODEX_HOME` (default `~/.codex`). For logs, use the plugin's `PLUGIN_DATA` directory if configured by the host; otherwise `$CODEX_HOME/feedback-loop/`. If that path is not exposed to the skill, ask for or locate the installed plugin data path; do not read Claude logs by default. Logs include `runtime`, `session_id`, `tool`, and `command`; prompt logging defaults on, matching the existing Claude plugin; set `FEEDBACK_LOOP_LOG_PROMPTS=0` to disable it.
+Read shared logs from `$CODEX_HOME/feedback-loop/` (default `~/.codex/feedback-loop/`) across all projects. `PLUGIN_DATA` does not override this location. Earlier plugin versions may have left logs in `PLUGIN_DATA`; those are not automatically migrated. Do not read Claude logs by default. Logs include `runtime`, `session_id`, `tool`, and `command`; prompt logging defaults on, matching the existing Claude plugin; set `FEEDBACK_LOOP_LOG_PROMPTS=0` to disable it.
 
 Read current and previous monthly `tool-detector-YYYY-MM.jsonl` logs. Inventory commands and MCP calls with counts and concrete examples. Inspect active user/project config.toml, `.rules` files under their rules directories, and managed restrictions when readable. Never infer effective permission solely from one file.
 

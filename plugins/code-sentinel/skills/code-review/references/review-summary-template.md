@@ -1,17 +1,20 @@
 # Review Summary Output Template
 
 Use this template to structure the final review output for step 9 (Provide Review Summary).
+The opening context section is required in chat and in any exported review. Follow step 3.5's
+access gate before proceeding; an explicit user-authorized exception must remain visible here.
+List only sources actually retrieved. Absence of access is not evidence of absent tickets or docs.
 
 ```
 Code Review:
 
-Ticket & Architecture Context (if found in step 3.5)
+Ticket & Architecture Context
 
-Key Docs: [Jira KEY link] · [Epic KEY link, or "no epic linked"] · [Confluence page title + link] · [another Confluence page title + link, if a second main doc surfaced] (⚠️ flag any doc >1yr old as potentially stale)
+Key Docs: [Jira KEY link + last-modified date] · [Epic KEY link + last-modified date, or "no epic linked" only after checking the ticket] · [Confluence page title + link + last-modified date] · [second main doc, if found] (⚠️ flag docs >1yr old as potentially stale; use "not applicable" for a user-confirmed ticketless change)
 
 [2 short paragraphs onboarding a reviewer unfamiliar with this project: what the project/feature is about, what the linked epic is trying to achieve, and the major design points surfaced by the docs above — enough to orient before reading the diff]
 
-Not attempted: [reason, e.g. "no Jira key in MR"] — omit this line if the step ran
+Context gaps / authorized exception: [Unavailable sources and explicit authorization to proceed, or completed searches that found no relevant docs; distinguish code-derived context from fetched requirements. Omit this line when there are no gaps.]
 
 MR Context (if GitLab MR exists)
 
@@ -23,6 +26,17 @@ MR Context (if GitLab MR exists)
 - Key Discussion Points:
   - [Point 1 from comments]
   - [Point 2 from comments]
+
+Reading Order
+
+1. [File/class/method to read first — what to understand here]
+2. [Next file/class/method — how it connects to the previous stop]
+   ...
+[One definitive sequence for the whole review, covering all affected flows and shared models. No per-change reading orders or alternative traversals.]
+
+Flows and model changes
+
+[Affected flow diagrams and model/domain/DTO diff trees from steps 5.2/5.3. State explicitly when there are no model changes.]
 
 Major Changes (Prioritized)
 

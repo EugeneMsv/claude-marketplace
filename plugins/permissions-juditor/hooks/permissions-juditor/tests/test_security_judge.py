@@ -973,7 +973,7 @@ def test_run_watchedCommand_autoModeContextIncludedInSystemPrompt(monkeypatch, t
         json.dumps(
             {
                 "autoMode": {
-                    "environment": ["$defaults", "Org: Acme Corp, ad-tech"],
+                    "environment": ["$defaults", "Org: Example organization, software development"],
                     "hard_deny": ["Never modify prod without asking"],
                     "soft_deny": ["Never run prod ops without asking first"],
                     "allow": ["Read-only shell inspection is allowed"],
@@ -988,7 +988,7 @@ def test_run_watchedCommand_autoModeContextIncludedInSystemPrompt(monkeypatch, t
     judge.run(_hook_input("python3 train_model.py"))
 
     system_prompt = stub_client.received["system"]
-    assert "Org: Acme Corp, ad-tech" in system_prompt
+    assert "Org: Example organization, software development" in system_prompt
     assert "Never modify prod without asking" in system_prompt
     assert "Never run prod ops without asking first" in system_prompt
     assert "Read-only shell inspection is allowed" in system_prompt

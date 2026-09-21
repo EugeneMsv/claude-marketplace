@@ -4,7 +4,7 @@ import fcntl
 import json
 import os
 import sys
-from agent_runtime import data_dir, runtime_name
+from agent_runtime import agent_home, runtime_name
 
 
 def timestamp():
@@ -25,7 +25,7 @@ def tool_context(event):
 
 
 def append_record(filename, record, now):
-    directory = data_dir("feedback-loop")
+    directory = agent_home() / "feedback-loop"
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     payload = (json.dumps(record, ensure_ascii=False) + "\n").encode()
     with (directory / ".logger.lock").open("a") as lock:

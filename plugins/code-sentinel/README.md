@@ -10,16 +10,17 @@ Trigger: "Review my feature branch", "PR review", "diff review"
 
 Performs a senior engineer code review against the repo's actual default branch (auto-detected — `main`, `master`, or otherwise):
 
-1. Fetches all remote branches, detects the default branch, and generates a diff via explicit merge-base
-2. Determines repo mode (monorepo by default, or per-service) — asks the user when ambiguous
-3. In per-service mode, uses git worktrees for full context on both branches; in monorepo mode, relies on the diff plus targeted `git show`/Read/Grep to avoid slow full checkouts
+1. Fetches remote branches, determines repo mode (monorepo by default, or per-service), detects the default branch, and reads merge request context
+2. Requires ticket, linked epic, and architecture research before generating the diff; missing access is a visible blocker unless the user explicitly authorizes proceeding with that gap
+3. Generates a diff via explicit merge-base. In per-service mode, uses git worktrees for full context on both branches; in monorepo mode, relies on the diff plus targeted `git show`/Read/Grep to avoid slow full checkouts
 4. Identifies affected data flows with layer-by-layer ASCII diagrams (Web → Domain → Persistence → External)
 5. Shows model/domain/DTO changes as a coloured diff tree (🔴 removed, 🟢 added, 🔵 changed, ⚪ unchanged)
 6. Reviews each major change for logic, performance, security, SOLID violations, and test coverage
-7. Produces a scored review (0–100) with copy-ready PR notes
+7. Opens the review with Key Docs and two onboarding paragraphs, then MR context, one global reading order, flows and model changes, and the change analysis; includes a score (0–100) and copy-ready PR notes
 8. Exports the full review to a markdown file in the selected runtime’s artifact directory
 
 **Rules:**
+- Never silently skips ticket and architecture context; distinguish unavailable sources from completed searches with no results
 - Never posts to GitLab unless explicitly instructed
 - Always compares against the auto-detected default branch (not hardcoded to `main`, not local)
 - Skips worktree creation by default in monorepo mode; always uses worktrees in per-service mode

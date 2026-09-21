@@ -39,6 +39,7 @@ def judge(monkeypatch, tmp_path):
 @pytest.mark.parametrize("tool", ["Bash", "mcp__example__read"])
 def test_shared_classifier_and_prompt_policy(judge, monkeypatch, tmp_path, runtime, decision, tool):
     monkeypatch.setenv("AGENT_RUNTIME", runtime)
+    monkeypatch.setenv("PLUGIN_DATA", str(tmp_path / "project-plugin-data"))
     calls = []
     class Client:
         @staticmethod
@@ -68,6 +69,46 @@ def test_shared_classifier_and_prompt_policy(judge, monkeypatch, tmp_path, runti
         assert output["decision"]["behavior"] == decision
     log = tmp_path / runtime / "permissions-juditor/decisions.jsonl"
     assert json.loads(log.read_text())["decision"] == decision
+    assert not (tmp_path / "project-plugin-data").exists()
+
+
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
+@pytest.mark.parametrize("custom_home", [False, True])
+def test_entrypoint_across_projects_appends_to_shared_log(judge, monkeypatch, tmp_path, runtime, custom_home):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    monkeypatch.delenv("AGENT_RUNTIME")
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(HOOK.parents[1]))
+    if runtime == "codex":
+        monkeypatch.setenv("PLUGIN_ROOT", str(HOOK.parents[1]))
+    home_variable = "CODEX_HOME" if runtime == "codex" else "CLAUDE_CONFIG_DIR"
+    if custom_home:
+        shared_home = tmp_path / runtime
+    else:
+        monkeypatch.delenv(home_variable)
+        shared_home = home / ("." + runtime)
+
+    for project_name in ["project-a", "project-b"]:
+        project = tmp_path / project_name
+        project.mkdir()
+        monkeypatch.setenv("PLUGIN_DATA", str(project / "plugin-data"))
+        # Unwatched commands exercise the real entry point without model calls.
+        payload = {"tool_name": "Bash", "tool_input": {"command": "echo shared-log-check"},
+                   "cwd": str(project), "session_id": project_name}
+        result = subprocess.run([sys.executable, str(HOOK / "security-judge.py")],
+                                input=json.dumps(payload), capture_output=True, text=True, cwd=project)
+        assert result.returncode == 0
+        assert json.loads(result.stdout) == {}
+        assert not result.stderr
+        assert not list(project.iterdir())
+
+    log = shared_home / "permissions-juditor/decisions.jsonl"
+    records = [json.loads(line) for line in log.read_text().splitlines()]
+    assert [record["session_id"] for record in records] == ["project-a", "project-b"]
+    assert all(record["outcome"] == "skip_unwatched_command" for record in records)
+    assert list(tmp_path.rglob("decisions.jsonl")) == [log]
 
 
 def test_codex_policy_reloaded_for_next_request(judge, monkeypatch):

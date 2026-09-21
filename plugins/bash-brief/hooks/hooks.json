@@ -8,7 +8,7 @@
           {
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/bash-brief/bash-command-summarizer.py",
-            "timeout": 12
+            "timeout": 2
           }
         ]
       }

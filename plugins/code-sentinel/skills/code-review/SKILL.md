@@ -54,17 +54,18 @@ You are an expert Senior Software Engineer performing a code review.
     - Use this context to inform the review (do NOT store separately)
     - Flag as a finding when a real, non-trivial change in the diff is absent from the MR description's stated scope — even if a reviewer comment confirms it's intentional, it should still be documented in the description for future readers
 
-3.5 **Deep Research Context** (Optional, best-effort — attempt first, before generating the diff)
+3.5 **Deep Research Context** (Required — complete before generating the diff)
     - Purpose: ground the review in the ticket's intent and any existing architecture docs before judging the diff
-    - Extract a Jira key from the MR title/description or branch name (e.g. `PROJ-12345` pattern); if none found, skip this step entirely — do NOT guess a ticket from title text alone
-    - Delegate this to a research agent if one is available in this setup (e.g. a deep-research-style agent); otherwise fall back to whatever general-purpose subagent is available, or do it inline yourself — let whichever agent runs figure out which tools it has access to
-    - Ask the agent to:
+    - Extract a Jira key from the MR title/description or branch name (e.g. `PROJ-12345` pattern). If none is found, ask for the ticket or confirmation that the change has no ticket; do NOT invent one or silently skip context research. For a confirmed ticketless change, research the relevant architecture and mark ticket/epic context not applicable.
+    - Delegate to an available research agent when delegation is supported and authorized; otherwise use an available general-purpose agent or perform the research inline. The researcher must check its actual tool access; missing tools in the parent alone do not establish that delegated access is unavailable.
+    - The researcher must:
         - Fetch the Jira ticket for scope/acceptance criteria
-        - Find and fetch its parent epic (if linked) for broader feature context
-        - Search Confluence for relevant architecture docs — **the exact search terms/spaces are out of scope of this skill**; if the user hasn't specified them, default to a Rovo-style search: 2-3 calls varying phrasing/keywords, merge and rank results by intersection, then do a recency check (flag pages >1 year old as potentially stale and treat code as ground truth over the doc)
-        - If a couple of main architecture docs surface, list their links on top of its report; then return a short onboarding synthesis (~2 paragraphs, not a link dump) written for a reviewer unfamiliar with this project: what the project/feature is about, what the epic is trying to achieve, and the major design points surfaced by those docs — enough context to orient before reading the diff
-    - Use the returned links and synthesis to inform Design Rationale and scope judgments (step 3) and to open the review summary (step 9) — never as a substitute for reading the actual diff
-    - Best-effort: if Jira/Confluence access is unavailable, no ticket is found, or the search returns nothing useful, note the gap and proceed to step 4 — do NOT block the review on this step
+        - Inspect the fetched ticket for a parent epic and fetch it when linked; only say "no epic linked" after checking the ticket
+        - Search Confluence for relevant architecture docs — use the user's search terms/spaces when supplied; otherwise make 2-3 Rovo-style calls varying phrasing/keywords, merge results, and rank their intersection first. Fetch the top 2-3 relevant pages before drawing conclusions. Record source links and last-modified dates, flag pages older than one year as potentially stale, and treat code as ground truth over docs.
+        - Return Key Docs links followed by two short onboarding paragraphs for a reviewer unfamiliar with the project: what the feature is about, what the epic aims to achieve, and the major design points. Distinguish verified source content, author claims, and code-derived inferences.
+    - If required ticket/epic retrieval or architecture search cannot run because access is unavailable, report the blocker and what is needed to resolve it before step 4. Resume after access is restored, the user supplies the missing source content, or the user explicitly authorizes a review with that gap. Do not equate unavailable access with "no epic linked" or "no relevant docs found."
+    - A completed search with no relevant architecture docs is a valid result: state what was searched and that none were found, then use clearly labeled code-derived architecture context. Do not fabricate sources to fill the template.
+    - Use the research to inform Design Rationale and scope judgments and open the review summary (step 9) with **Ticket & Architecture Context** in chat and in any exported review. Include the Key Docs line, the two-paragraph synthesis, and any gaps or explicit user-authorized exception. Never replace this section with only a findings summary or a file link; the research also does not replace reading the actual diff.
 
 4. **Generate Diff**
     - Detect the actual default branch in BOTH modes (do NOT assume `main`):
@@ -110,26 +111,23 @@ You are an expert Senior Software Engineer performing a code review.
 Load `references/flow-diagram-examples.md` for the full checklist and worked ASCII examples for
 both sub-steps before producing flow diagrams or model diff trees.
 
-6. **Prioritize by Impact**
+6. **Set the Review Order**
     - Reorder from most to least impactful:
         - Core functionality changes (highest priority)
         - API/interface modifications
         - Architectural changes
         - Algorithm updates
         - Configuration changes (lowest priority)
-    - Immediately after listing the prioritized changes, print a concise reading-order suggestion
-      per changed flow so the reviewer can traverse the MR sequentially instead of jumping between
-      findings — a statement, not a question to wait on. Identified per flow from the entry
-      points found in 5.2, not one fixed direction for the whole MR:
-        - **Top-down**: start at the flow's entry point (REST endpoint, message topic, scheduled
-          job — the natural "top") and read down through the layer transitions into the
-          components it touches, same direction as the 5.2 diagram
-        - **Bottom-up**: start at the innermost changed component (e.g. a shared calculator,
-          validator, or model/DTO from 5.3) and read outward to the entry point(s) that invoke it
-        - MUST print both options concisely for each changed flow (one line each: what to read
-          first, what follows) — do not pick one and omit the other
-        - If several flows changed, say so and give both options per flow — they may not all
-          suit the same traversal
+    - Present exactly one **Reading Order** for the entire review: a numbered sequence of
+      concrete files/classes/methods, with a short explanation of what to understand at each stop.
+      Choose one traversal that connects all affected flows and shared models; include shared
+      components once. Do not offer alternative top-down/bottom-up routes or repeat reading
+      orders under individual changes or flows.
+    - After ticket/architecture and MR context, use this presentation order in chat and any
+      exported review: **Reading Order → Flows and model changes → Changes**. Put the flow
+      diagrams and model diff trees from steps 5.2/5.3 immediately after the global reading
+      order, before the prioritized change list and detailed analysis. Impact ranking governs
+      the change analysis; the reading order guides the reader through the code.
 
 7. **Review Each Major Change**
 
@@ -162,7 +160,7 @@ both sub-steps before producing flow diagrams or model diff trees.
 - In **per-service mode**, use the original triple-dot diff (`git diff origin/<default-branch>...origin/<branch>`)
 - MUST store diff and review artifacts under `<artifact-dir>/` (not in the artifact root)
 - MUST ask the user for mode (monorepo vs. per-service) when it cannot be confidently inferred, defaulting to monorepo if still unspecified
-- SHOULD attempt Deep Research Context (step 3.5) as best-effort when a Jira key is discoverable in the MR — skip silently (no need to tell the user) when there's no key, no ticket-tracker access, or nothing relevant turns up
+- MUST complete Deep Research Context (step 3.5) before generating the diff and include its context section in the review output; handle blockers and explicit user-authorized exceptions as defined there. Never skip it silently.
 - Confluence search strategy for step 3.5 is out of scope of this skill — if the user hasn't given search terms, default to a Rovo-style search (2-3 calls with varied phrasing/keywords) with a recency check on results
 - MUST skip git worktree creation by default in monorepo mode — use the diff file plus targeted `git show`/Read/Grep instead
 - MUST use git worktree per branch by default in per-service mode

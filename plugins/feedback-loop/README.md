@@ -4,7 +4,7 @@ Local tool-use, failure, and configurable prompt logging for Claude Code and Cod
 
 ## Runtime
 
-Set `AGENT_RUNTIME=claude` or `AGENT_RUNTIME=codex`. If unset, Codex's `PLUGIN_ROOT` selects Codex; otherwise Claude is the default. Invalid values cause the hook to log a diagnostic and defer. Codex data uses `PLUGIN_DATA` when available, otherwise `$CODEX_HOME/feedback-loop` (default `~/.codex/feedback-loop`). Claude uses `$CLAUDE_CONFIG_DIR/feedback-loop` (default `~/.claude/feedback-loop`). Python 3.11+ is required.
+Set `AGENT_RUNTIME=claude` or `AGENT_RUNTIME=codex`. If unset, Codex's `PLUGIN_ROOT` selects Codex; otherwise Claude is the default. Invalid values cause the hook to log a diagnostic and defer. Codex logs always use `$CODEX_HOME/feedback-loop` (default `~/.codex/feedback-loop`). Claude uses `$CLAUDE_CONFIG_DIR/feedback-loop` (default `~/.claude/feedback-loop`). All projects append to the same logs for their runtime; `PLUGIN_DATA` does not override this location. Python 3.11+ is required.
 
 ## Events and data
 
@@ -14,6 +14,8 @@ Set `AGENT_RUNTIME=claude` or `AGENT_RUNTIME=codex`. If unset, Codex's `PLUGIN_R
 - UserPromptSubmit: weekly prompt logging defaults on, preserving the existing behavior. Set `FEEDBACK_LOOP_LOG_PROMPTS=0` to disable it.
 
 Logs stay local and are created with owner-only file permissions. Commands and prompts may contain private data; no automatic upload occurs. Failure logs retain 90 days; monthly tool logs and weekly prompt logs remain until separately archived. Hooks always defer to normal host behavior after recording evidence. Codex hooks require trust review before activation.
+
+If logs appear missing after an update, check the shared runtime directory above. Earlier Codex versions of this plugin could write to `PLUGIN_DATA`; existing logs there are left in place and are not automatically merged.
 
 ## Skills
 

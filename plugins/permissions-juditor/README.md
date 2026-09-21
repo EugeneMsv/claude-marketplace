@@ -13,4 +13,6 @@ Set `AGENT_RUNTIME=claude|codex`. If unset, PLUGIN_ROOT selects Codex; otherwise
 - [Claude Code](references/claude.md): classifier decisions map to Claude PermissionRequest outputs.
 - [Codex](references/codex.md): the same classifier runs; allow/deny map to Codex outputs, while ask maps to deny with an explanation. Logs preserve the original classifier decision.
 
-Errors or missing credentials never auto-allow. Decisions are logged under the selected runtime's data directory; policy stays shared. Review and trust Codex hooks before use. Installation does not change native approval settings.
+Errors or missing credentials never auto-allow. All projects share `decisions.jsonl` under `$CODEX_HOME/permissions-juditor` (default `~/.codex/permissions-juditor`) or `$CLAUDE_CONFIG_DIR/permissions-juditor` (default `~/.claude/permissions-juditor`); `PLUGIN_DATA` does not override this location. Policy stays shared. Review and trust Codex hooks before use. Installation does not change native approval settings.
+
+If decision logs appear missing after an update, check the shared runtime directory above. Earlier Codex versions of this plugin could write to `PLUGIN_DATA`; existing logs there are left in place and are not automatically merged.
