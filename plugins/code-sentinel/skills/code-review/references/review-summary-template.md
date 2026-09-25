@@ -12,7 +12,19 @@ Ticket & Architecture Context
 
 Key Docs: [Jira KEY link + last-modified date] · [Epic KEY link + last-modified date, or "no epic linked" only after checking the ticket] · [Confluence page title + link + last-modified date] · [second main doc, if found] (⚠️ flag docs >1yr old as potentially stale; use "not applicable" for a user-confirmed ticketless change)
 
-[2 short paragraphs onboarding a reviewer unfamiliar with this project: what the project/feature is about, what the linked epic is trying to achieve, and the major design points surfaced by the docs above — enough to orient before reading the diff]
+What the MR does
+
+- **Problem:** [what is broken/missing + the mechanism: concrete identifiers, rules, or data that cause it]
+- **Why not the obvious fix:** [constraint ruling out the simpler approach, with its source]
+- **The fix:** [behaviour: inputs → what the system now returns/does]
+- **Why here:** [why this system/layer; epic goal if one is linked]
+
+How it relates to [nearest confusable entity: sibling app/channel/service, same-named system, overlapping ticket]
+
+- [What the change touches and does NOT touch, with the data/code evidence checked]
+- [Unknowns stated inline: "I infer…", "not verified", "checked one day only"]
+
+(Plain language, jargon expanded on first use, one causal step per bullet, no file:line refs.)
 
 Context gaps / authorized exception: [Unavailable sources and explicit authorization to proceed, or completed searches that found no relevant docs; distinguish code-derived context from fetched requirements. Omit this line when there are no gaps.]
 
