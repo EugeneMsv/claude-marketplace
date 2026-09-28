@@ -83,6 +83,15 @@ You are an expert Senior Software Engineer performing a code review.
     - A completed search with no relevant architecture docs is a valid result: state what was searched and that none were found, then use clearly labeled code-derived architecture context. Do not fabricate sources to fill the template.
     - Use the research to inform Design Rationale and scope judgments and open the review summary (step 9) with **Ticket & Architecture Context** in chat and in any exported review. Include the Key Docs line, the What the MR does and How it relates to <X> blocks, and any gaps or explicit user-authorized exception. Never replace this section with only a findings summary or a file link; the research also does not replace reading the actual diff.
 
+3.6 **Problem Statement Review** (Required — complete before generating the diff)
+    - Give the researcher's What the MR does and How it relates to <X> blocks, plus the sources they cite, to an independent reviewer: a different agent from the researcher when delegation is supported and authorized, otherwise a separate inline pass of your own
+    - The reviewer rewrites the blocks until they meet step 3.5. It passes them only when:
+        - a newcomer could repeat the problem in one sentence that names the input, the wrong outcome, and who is harmed
+        - every Problem beat is present and the beats read as one connected chain, each following from the one before
+        - each label appears once
+    - The reviewer may rephrase, reorder, and cut, but adds no fact absent from the cited sources. A beat it cannot fill stays in, marked unknown, with what would settle it.
+    - Use the reviewed blocks in the review output
+
 4. **Generate Diff**
     - Detect the actual default branch in BOTH modes (do NOT assume `main`):
       ```bash
@@ -176,7 +185,7 @@ both sub-steps before producing flow diagrams or model diff trees.
 - In **per-service mode**, use the original triple-dot diff (`git diff origin/<default-branch>...origin/<branch>`)
 - MUST store diff and review artifacts under `<artifact-dir>/` (not in the artifact root)
 - MUST ask the user for mode (monorepo vs. per-service) when it cannot be confidently inferred, defaulting to monorepo if still unspecified
-- MUST complete Deep Research Context (step 3.5) before generating the diff and include its context section in the review output; handle blockers and explicit user-authorized exceptions as defined there. Never skip it silently.
+- MUST complete Deep Research Context (step 3.5) and Problem Statement Review (step 3.6) before generating the diff, and include the reviewed context section in the review output; handle blockers and explicit user-authorized exceptions as defined there. Never skip either silently.
 - Confluence search strategy for step 3.5 is out of scope of this skill — if the user hasn't given search terms, default to a Rovo-style search (2-3 calls with varied phrasing/keywords) with a recency check on results
 - MUST skip git worktree creation by default in monorepo mode — use the diff file plus targeted `git show`/Read/Grep instead
 - MUST use git worktree per branch by default in per-service mode

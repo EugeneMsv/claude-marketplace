@@ -11,7 +11,7 @@ Trigger: "Review my feature branch", "PR review", "diff review"
 Performs a senior engineer code review against the repo's actual default branch (auto-detected — `main`, `master`, or otherwise):
 
 1. Fetches remote branches, determines repo mode (monorepo by default, or per-service), detects the default branch, and reads merge request context
-2. Requires ticket, linked epic, and architecture research before generating the diff; missing access is a visible blocker unless the user explicitly authorizes proceeding with that gap
+2. Requires ticket, linked epic, and architecture research before generating the diff; missing access is a visible blocker unless the user explicitly authorizes proceeding with that gap. An independent reviewer then rewrites the resulting problem statement until a newcomer could restate it in one sentence
 3. Generates a diff via explicit merge-base. In per-service mode, uses git worktrees for full context on both branches; in monorepo mode, relies on the diff plus targeted `git show`/Read/Grep to avoid slow full checkouts
 4. Identifies affected data flows with layer-by-layer ASCII diagrams (Web → Domain → Persistence → External)
 5. Shows model/domain/DTO changes as a coloured diff tree (🔴 removed, 🟢 added, 🔵 changed, ⚪ unchanged)

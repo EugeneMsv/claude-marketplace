@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "version": "0.1.47",
+  "version": "0.1.48",
   "name": "eug-msv-claude-marketplace",
   "description": "Plugin marketplace for Claude Code from Eugene Moiseev",
   "updated": "2026-09-28",
@@ -83,7 +83,7 @@
       "name": "code-sentinel",
       "source": "./plugins/code-sentinel",
       "description": "Code Sentinel — expert code review with flow diagrams and interactive MR comment resolution",
-      "version": "0.1.9",
+      "version": "0.1.10",
       "author": {
         "name": "Eugene Moiseev"
       },
