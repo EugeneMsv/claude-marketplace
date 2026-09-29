@@ -69,6 +69,7 @@ The classification prompt embeds your existing `~/.claude/settings.json` `permis
 
 - **Deny rules are authoritative** — a match (or functional equivalent) forces `deny`.
 - **Ask and allow rules are context only**, not a rulebook to replicate — the model is told to prefer `allow` when genuinely confident a command is safe, even if a static `ask` rule would have caught it, but never to stretch to `allow` out of real uncertainty. Security comes first; reducing prompts is the secondary goal.
+- **The more specific rule wins** when any two rules or examples conflict — but nothing overrides a deny.
 
 ### Auto-mode context — an additional suggestion alongside each rule
 
@@ -77,8 +78,8 @@ If your `~/.claude/settings.json` has an `autoMode` section (the prose instructi
 | `autoMode` key | Attached under | Weight |
 |---|---|---|
 | `hard_deny` | Deny rules | Authoritative — same as a deny-rule match |
-| `soft_deny` | Ask rules | Authoritative for `ask` — same as an ask-rule match |
-| `allow` | Allow rules | Context only, same non-binding treatment as the allow rules themselves |
+| `soft_deny` | Ask rules | Authoritative for `ask`, unless an `allow` entry names that exact case |
+| `allow` | Allow rules | Calibration; overrides a `soft_deny` match only by naming that exact case |
 | `environment` | Its own line, before "How to use this reference" | Background — used to judge whether a hostname/GCP project/login-path/path named in the command is production or non-production |
 
 The literal `"$defaults"` placeholder entry (Claude Code substitutes this for its own built-in defaults at classification time) is filtered out before the prompt is built — it would be meaningless as literal text outside Claude Code's own classifier. Missing file, missing `autoMode` key, or malformed JSON all resolve to empty lists, same fail-open behavior as the Bash-rules reference above.
@@ -89,7 +90,7 @@ The literal `"$defaults"` placeholder entry (Claude Code substitutes this for it
 - **ask** — genuinely ambiguous, or a real-but-bounded side effect worth a glance: writing local files, installing packages, opening a local network listener.
 - **deny** — destructive, exfiltrates data, escalates privileges, disables security controls, obfuscates its own behavior, or targets credentials/sensitive paths.
 
-The full prompt (including few-shot examples) lives in `SYSTEM_TEMPLATE` (static instructions + reference rules — sent as the request's cached system prompt) and `USER_TEMPLATE` (just `cwd`/command — the part that changes every call) in `security-judge.py`, and is easily edited.
+The system prompt (static instructions + reference rules + few-shot examples — sent as the request's cached system prompt) lives in `hooks/permissions-juditor/security-judge-system-prompt.md`, next to the script; its `{{name}}` markers (`deny_rules`, `ask_rules`, `allow_rules`, `hard_deny`, `soft_deny`, `auto_allow`, `environment`) are filled from your settings on each call. `USER_TEMPLATE` (just `cwd`/command — the part that changes every call) stays in `security-judge.py`.
 
 ## Model Resolution
 

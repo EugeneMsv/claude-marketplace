@@ -1001,7 +1001,7 @@ def test_run_watchedCommand_autoModeContextIncludedInSystemPrompt(monkeypatch, t
 def test_buildSystemPrompt_mentionsLongRangeSqlScanGuidance():
     """Regression guard: a read-only SQL query spanning months/years on a
     large table must still be steered toward "ask" - the guidance and its
-    few-shot example live as static prose in SYSTEM_TEMPLATE, not behind any
+    few-shot example live as static prose in security-judge-system-prompt.md, not behind any
     formatted placeholder, so nothing else exercises this text."""
     empty_rules = {"allow": [], "ask": [], "deny": []}
     empty_auto_mode = {"environment": [], "allow": [], "soft_deny": [], "hard_deny": []}
@@ -1015,7 +1015,7 @@ def test_buildSystemPrompt_mentionsLongRangeSqlScanGuidance():
 def test_buildSystemPrompt_mentionsPartitionsMetadataIsCheapNotAScan():
     """Regression guard: $partitions catalog lookups must not be confused
     with a real wide-range data scan - both live as static prose/examples in
-    SYSTEM_TEMPLATE, not behind any formatted placeholder."""
+    security-judge-system-prompt.md, not behind any formatted placeholder."""
     empty_rules = {"allow": [], "ask": [], "deny": []}
     empty_auto_mode = {"environment": [], "allow": [], "soft_deny": [], "hard_deny": []}
 
@@ -1023,6 +1023,79 @@ def test_buildSystemPrompt_mentionsPartitionsMetadataIsCheapNotAScan():
 
     assert "$partitions" in system_prompt
     assert 'orders$partitions' in system_prompt
+
+
+@pytest.mark.parametrize("contradicting_phrase", [
+    "plain SELECT reasonably scoped in time/row count",
+    "a SQL UPDATE/INSERT scoped to specific rows",
+    "a LIMIT clause on the returned rows does not change this",
+    "narrowly-scoped INSERT/UPDATE is ask",
+    "not a read or bounded update",
+])
+def test_buildSystemPrompt_builtInSqlDefaults_omitVerdictsThatContradictAutoModePolicy(contradicting_phrase):
+    """Built-in SQL defaults must not restate verdicts that the auto-mode policy decides."""
+    empty_rules = {"allow": [], "ask": [], "deny": []}
+    empty_auto_mode = {"environment": [], "allow": [], "soft_deny": [], "hard_deny": []}
+
+    system_prompt = " ".join(judge.build_system_prompt(empty_rules, empty_auto_mode).split())
+
+    assert contradicting_phrase not in system_prompt
+
+
+def test_buildSystemPrompt_conflictingRules_moreSpecificWinsButNeverOverridesDeny():
+    """Conflict resolution must prefer the more specific rule without ever overriding a deny."""
+    empty_rules = {"allow": [], "ask": [], "deny": []}
+    empty_auto_mode = {"environment": [], "allow": [], "soft_deny": [], "hard_deny": []}
+
+    system_prompt = " ".join(judge.build_system_prompt(empty_rules, empty_auto_mode).split())
+
+    assert "the more specific rule wins - but nothing overrides a deny" in system_prompt
+
+
+@pytest.mark.parametrize("placeholder", [
+    "deny_rules", "ask_rules", "allow_rules", "environment", "auto_allow", "soft_deny", "hard_deny",
+])
+def test_systemPromptFile_injectablePlaceholder_isPresent(placeholder):
+    """Every value build_system_prompt injects must have a {{marker}} in the prompt file."""
+    template = judge.SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
+
+    assert "{{" + placeholder + "}}" in template
+
+
+def test_buildSystemPrompt_renderedPrompt_leavesNoPlaceholderUnresolved():
+    """A marker left in the rendered prompt would reach the model as literal text."""
+    empty_rules = {"allow": [], "ask": [], "deny": []}
+    empty_auto_mode = {"environment": [], "allow": [], "soft_deny": [], "hard_deny": []}
+
+    system_prompt = judge.build_system_prompt(empty_rules, empty_auto_mode)
+
+    assert judge.SYSTEM_PROMPT_PLACEHOLDER_RE.search(system_prompt) is None
+
+
+@pytest.mark.parametrize("template, values, expected", [
+    ("A: {{first}} B: {{second}}", {"first": "{{second}}", "second": "x"}, "A: {{second}} B: x"),
+    ("keep {{unknown}}", {}, "keep {{unknown}}"),
+    ('{"query": "SELECT 1"} {{first}}', {"first": "v"}, '{"query": "SELECT 1"} v'),
+])
+def test_renderSystemPrompt_singlePass_expandsOnlyKnownTemplateMarkers(template, values, expected):
+    """Injected text is never re-scanned, unknown markers and literal JSON braces stay verbatim."""
+    rendered = judge.render_system_prompt(template, values)
+
+    assert rendered == expected
+
+
+@pytest.mark.parametrize("build_prompt, expected_subject", [
+    (lambda: judge.build_user_prompt("ls -la", "/repo"), "ls -la"),
+    (lambda: judge.build_mcp_user_prompt("mcp__x__read", {"id": 1}, "/repo"),
+     'MCP tool `mcp__x__read` invoked with parameters: {"id": 1}'),
+])
+def test_buildUserPrompt_bashOrMcpCall_wrapsSubjectInToolCallMarkers(build_prompt, expected_subject):
+    """Bash and MCP calls share one <tool_call> marker, matching what the system prompt names."""
+    user_prompt = build_prompt()
+
+    assert f"<tool_call>\n{expected_subject}\n</tool_call>" in user_prompt
+    assert "Working directory: /repo" in user_prompt
+    assert "<command>" not in user_prompt
 
 
 def test_buildSystemPrompt_mentionsGrafanaWideTimeRangeGuidance():
@@ -1094,7 +1167,7 @@ def test_run_mcpToolNoCredentials_returnsEmptyAndLogsSkipNoCredentials(monkeypat
 def test_run_mcpTool_sendsToolNameAndParamsInPromptNotSystem(monkeypatch):
     """cwd/tool-call subject are the per-call variable part - they belong in
     the user prompt, never in the cacheable system block. Uses a pageId not
-    reused by any SYSTEM_TEMPLATE few-shot example, so a false-negative match
+    reused by any security-judge-system-prompt.md few-shot example, so a false-negative match
     against static example text can't hide a real leak into system."""
     monkeypatch.setenv(judge.WATCHED_COMMANDS_ENV_VAR, "mcp__atlassian__*")
     stub_client = _StubClient(result={"decision": "allow", "reasoning": "safe"})
@@ -1108,7 +1181,7 @@ def test_run_mcpTool_sendsToolNameAndParamsInPromptNotSystem(monkeypatch):
 
 
 def test_run_mcpTool_systemPromptUsesMcpReferenceRulesNotBashRules(monkeypatch, tmp_path):
-    """mcp__github__deleteRepository doesn't appear in any SYSTEM_TEMPLATE
+    """mcp__github__deleteRepository doesn't appear in any security-judge-system-prompt.md
     few-shot example, so a match against static example text can't produce a
     false pass here (unlike a rule string the template's own examples reuse)."""
     monkeypatch.setenv(judge.WATCHED_COMMANDS_ENV_VAR, "mcp__atlassian__*")
