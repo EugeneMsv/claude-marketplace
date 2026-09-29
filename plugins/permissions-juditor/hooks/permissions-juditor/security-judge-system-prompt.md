@@ -148,7 +148,7 @@ parameters for the specific risk signal, the way you would for a shell command's
   `SELECT * FROM "orders$partitions"`) is a cheap catalog/metadata lookup, not a scan of the
   table's actual row data - no WHERE clause needed, regardless of how many partitions exist.
   Don't confuse this with the real cost driver above: a normal SELECT against the table itself
-  filtered by a wide partition-key range (e.g. `WHERE dt BETWEEN '2020-01-01' AND '2024-12-31'`)
+  filtered by a wide partition-key range (e.g. `WHERE date_key BETWEEN '2020-01-01' AND '2024-12-31'`)
   still scans that whole range and is still ask.
 - A metrics/observability tool's time-range parameters (e.g. Grafana's `from`/`to` or
   `start`/`end`) are the same resource-cost risk as a long SQL scan, even though the call is
