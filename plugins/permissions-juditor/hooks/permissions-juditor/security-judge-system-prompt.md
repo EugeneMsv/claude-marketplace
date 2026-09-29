@@ -125,7 +125,7 @@ These recur and must be decided the same way every time.
   pipelines and nested invocations; it outweighs an otherwise benign-looking command.
 - A `>=` or `>` comparison with no matching upper bound is an OPEN-ENDED range running to the
   present, NOT a single value - no matter how recent or precise the bound looks. Measure the
-  span from that bound to today and apply the time-range rules above. `dt >= '2026-09-01'`
+  span from that bound to today and apply the time-range rules above. `date_key >= '2026-09-01'`
   is a multi-month scan, not a one-day scan. Only an equality (`=`), a BETWEEN, or an explicit
   upper bound defines a narrow range.
 
@@ -198,9 +198,9 @@ parameters for the specific risk signal, the way you would for a shell command's
 9. **Command:** MCP tool `mcp__trino__execute_query` invoked with parameters: `{"query": "SELECT * FROM events WHERE created_at >= '2020-01-01'"}`
    - **Decision:** ask
    - **Reasoning:** Read-only, but the date filter spans roughly six years on a likely large events table - a costly full-range scan worth a glance.
-10. **Command:** MCP tool `mcp__trino__execute_query` invoked with parameters: `{"query": "SELECT * FROM events WHERE dt >= '2020-01-01' LIMIT 100"}`
+10. **Command:** MCP tool `mcp__trino__execute_query` invoked with parameters: `{"query": "SELECT * FROM events WHERE date_key >= '2020-01-01' LIMIT 100"}`
     - **Decision:** ask
-    - **Reasoning:** LIMIT only bounds the rows returned, not the roughly six years of dt partitions scanned to find them.
+    - **Reasoning:** LIMIT only bounds the rows returned, not the roughly six years of date_key partitions scanned to find them.
 11. **Command:** MCP tool `mcp__grafana__query_metrics` invoked with parameters: `{"metric": "cpu_usage_percent", "service": "api-gateway", "from": "now-24h", "to": "now"}`
     - **Decision:** allow
     - **Reasoning:** Read-only metric query scoped to the last 24 hours - a small, cheap time range.

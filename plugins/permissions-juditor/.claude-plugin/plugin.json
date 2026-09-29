@@ -1,6 +1,6 @@
 {
   "name": "permissions-juditor",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "description": "Permissions Juditor — Sonnet-based security classification of Bash commands and MCP tool calls before permission is requested (scope controlled by PERMISSIONS_JUDITOR_WATCHED_COMMANDS env var, defaults to python3; no MCP tool watched until added)",
   "hooks": "./hooks/claude.json"
 }
