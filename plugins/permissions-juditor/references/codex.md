@@ -8,14 +8,12 @@ Use AGENT_RUNTIME=codex, or allow PLUGIN_ROOT detection. The Codex manifest sele
 
 - allow: PermissionRequest decision behavior=allow.
 - deny: behavior=deny with the classifier reason.
-- ask: behavior=deny with a message explaining that the classifier requested review and Codex blocked the action, followed by the classifier reason.
+- ask: an empty object (`{}`), leaving the decision to the configured Codex approval reviewer.
 
-Codex does not support a PermissionRequest ask behavior. Mapping ask to deny blocks the action in both manual and automatic approval modes instead of falling back to a reviewer that could approve it. This does not create a confirmation popup or change native approval settings. Claude continues to receive ask unchanged.
+Codex does not support a PermissionRequest ask behavior. Mapping ask to `{}` declines to decide: `approvals_reviewer = "user"` sends the request to the user, while `"auto_review"` sends eligible requests to the native reviewer. This does not change native approval settings. Claude continues to receive ask unchanged.
 
-Missing credentials still return no override — the plugin is simply not configured, so Codex's normal flow applies. Malformed model responses and API failures on a watched call, however, now produce an explicit ask from the classifier, which this adapter maps to deny. Under Codex those cases therefore **block** the call rather than deferring it; under Claude they surface as a review prompt. Neither ever allows.
+Missing credentials return no override. Malformed model responses and API failures on a watched call produce ask, which also returns `{}` under Codex. The configured reviewer therefore handles these failures and may approve or reject the action; the plugin itself does not auto-allow them. Claude receives the review request unchanged.
 
-The practical consequence is that a transient network error or rate-limit response blocks a watched command under Codex. That is the intended trade — deferring would hand an unjudged call to an automatic reviewer — but it makes retrying transient failures more valuable here than on Claude, and it means a burst of 429s shows up as a burst of blocked commands rather than extra prompts.
-
-Decision logs preserve the classifier's original decision: an ask entry means the Codex adapter returned deny. When diagnosing a block, check the returned PermissionRequest decision as well as the classifier log. Replaying a classifier input does not execute the classified command.
+Decision logs preserve the classifier's original decision: an ask entry means the Codex adapter returned no decision, not a denial. Replaying a classifier input does not execute the classified command.
 
 The hook only runs for requests that need approval, not every command. Codex sandbox/managed restrictions still apply. All projects append decisions to `$CODEX_HOME/permissions-juditor/decisions.jsonl` (default `~/.codex/permissions-juditor/decisions.jsonl`); `PLUGIN_DATA` does not override this location. Earlier plugin versions may have left logs in `PLUGIN_DATA`; those are not automatically migrated. The main assistant model is independent of the classifier model. No live API call is made by unit tests.

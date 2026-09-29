@@ -29,10 +29,9 @@ Failure handling splits on whether this hook actually meant to judge the call:
   — so the user gets Claude Code's normal permission flow, exactly as if this
   plugin weren't installed.
 - A watched call this hook intended to judge but could not (network failure,
-  HTTP error, unexpected model output): returns an explicit "ask". {} is not
-  safe here — if the user's own settings already allow that command, falling
-  through auto-approves it with no judgment at all, which is precisely the
-  case this hook exists to catch.
+  HTTP error, unexpected model output): produces an explicit "ask". Claude
+  receives that review request unchanged; Codex returns {} to defer to its
+  configured approval reviewer. The classifier itself never allows the call.
 
 A watched Bash command longer than MAX_COMMAND_CHARS is denied outright rather
 than judged on its truncated prefix, with a message telling the caller to split
@@ -944,11 +943,9 @@ def _log(record: dict) -> None:
 
 def _decision_output(behavior: str, message: str) -> dict:
     if runtime_name() == "codex":
-        # Codex has no PermissionRequest "ask" decision. Block review requests
-        # so the host's automatic reviewer cannot approve them on fallback.
+        # Codex has no PermissionRequest "ask" decision; defer to its reviewer.
         if behavior == "ask":
-            behavior = "deny"
-            message = "[permissions-juditor] Classifier requested review; blocked in Codex: " + message
+            return {}
         decision = {"behavior": behavior}
         if behavior == "deny":
             decision["message"] = message

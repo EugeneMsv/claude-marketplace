@@ -11,7 +11,7 @@ Both runtimes read `$CLAUDE_CONFIG_DIR/settings.json`, defaulting to `~/.claude/
 Set `AGENT_RUNTIME=claude|codex`. If unset, PLUGIN_ROOT selects Codex; otherwise Claude is selected. Each manifest selects its complete hooks/claude.json or hooks/codex.json, both calling security-judge.py directly.
 
 - [Claude Code](references/claude.md): classifier decisions map to Claude PermissionRequest outputs.
-- [Codex](references/codex.md): the same classifier runs; allow/deny map to Codex outputs, while ask maps to deny with an explanation. Logs preserve the original classifier decision.
+- [Codex](references/codex.md): the same classifier runs; allow/deny map to Codex outputs, while ask returns an empty object to defer to the configured Codex reviewer. Logs preserve the original classifier decision.
 
 Errors or missing credentials never auto-allow. All projects share `decisions.jsonl` under `$CODEX_HOME/permissions-juditor` (default `~/.codex/permissions-juditor`) or `$CLAUDE_CONFIG_DIR/permissions-juditor` (default `~/.claude/permissions-juditor`); `PLUGIN_DATA` does not override this location. Policy stays shared. Review and trust Codex hooks before use. Installation does not change native approval settings.
 

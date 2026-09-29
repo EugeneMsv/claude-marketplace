@@ -58,14 +58,11 @@ def test_shared_classifier_and_prompt_policy(judge, monkeypatch, tmp_path, runti
         assert value in system
     assert ("Bash(rm -rf *)" if tool == "Bash" else "mcp__example__delete") in system
     assert judge.SETTINGS_PATH == tmp_path / "claude/settings.json"
-    output = result["hookSpecificOutput"]
-    assert output["hookEventName"] == "PermissionRequest"
     if runtime == "codex" and decision == "ask":
-        assert output["decision"] == {
-            "behavior": "deny",
-            "message": "[permissions-juditor] Classifier requested review; blocked in Codex: classifier reason",
-        }
+        assert result == {}
     else:
+        output = result["hookSpecificOutput"]
+        assert output["hookEventName"] == "PermissionRequest"
         assert output["decision"]["behavior"] == decision
     log = tmp_path / runtime / "permissions-juditor/decisions.jsonl"
     assert json.loads(log.read_text())["decision"] == decision
@@ -120,10 +117,8 @@ def test_codex_policy_reloaded_for_next_request(judge, monkeypatch):
 
 @pytest.mark.parametrize("failure", ["credentials", "network", "invalid"])
 def test_codex_classifier_failure_never_allows(judge, monkeypatch, failure):
-    """Missing credentials means the plugin isn't configured, so it defers to the
-    host's normal flow. A network/output failure on a watched command means it
-    meant to judge and couldn't, which becomes an explicit review request -
-    mapped to deny under Codex, which has no "ask". Neither ever allows."""
+    """Missing credentials and classifier failures defer to Codex's reviewer.
+    The hook itself never returns an allow decision for these failures."""
     monkeypatch.setenv("AGENT_RUNTIME", "codex")
     class Client:
         @staticmethod
@@ -137,10 +132,7 @@ def test_codex_classifier_failure_never_allows(judge, monkeypatch, failure):
 
     result = judge.run(json.dumps({"tool_name": "Bash", "tool_input": {"command": "python3 script.py"}}))
 
-    if failure == "credentials":
-        assert result == {}
-    else:
-        assert result["hookSpecificOutput"]["decision"]["behavior"] == "deny"
+    assert result == {}
 
 
 def test_invalid_runtime_main_defers(judge):
